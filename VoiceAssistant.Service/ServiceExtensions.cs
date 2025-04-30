@@ -1,6 +1,7 @@
-// VoiceAssistant.Service/ServiceExtensions.cs
-
+using Serilog;
+using Topshelf;
 using Topshelf.HostConfigurators;
+using Topshelf.Logging;
 
 namespace VoiceAssistant.Service
 {
@@ -14,19 +15,19 @@ namespace VoiceAssistant.Service
         /// </summary>
         /// <param name="configurator">The HostConfigurator to configure.</param>
         /// <returns>The configured HostConfigurator.</returns>
-        public static HostConfigurator UseSerilog(this HostConfigurator configurator)
+        public static HostConfigurator ConfigureSerilog(this HostConfigurator configurator)
         {
             if (configurator == null)
                 throw new ArgumentNullException(nameof(configurator));
 
-            // Ensure log directory exists
-            string logDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
-            if (!Directory.Exists(logDirectory))
-            {
-                Directory.CreateDirectory(logDirectory);
-            }
-
-            // Use the logger that was already configured in Program.cs
+            // Configure Serilog
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Information()
+                .WriteTo.File("logs/voice-assistant-.log", rollingInterval: Serilog.RollingInterval.Day)
+                .WriteTo.Console()
+                .CreateLogger();
+            
+            // Connect Serilog to Topshelf's logging system
             configurator.UseSerilog();
             
             return configurator;

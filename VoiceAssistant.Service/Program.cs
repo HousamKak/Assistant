@@ -107,7 +107,7 @@ namespace VoiceAssistant.Service
                 var exitCode = HostFactory.Run(x =>
                 {
                     // Use our Serilog logger
-                    x.UseSerilog();
+                    x.ConfigureSerilog();
 
                     x.Service<ServiceManager>(service =>
                     {

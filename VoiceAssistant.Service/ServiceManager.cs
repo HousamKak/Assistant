@@ -1,13 +1,9 @@
 // VoiceAssistant.Service/Services/ServiceManager.cs
 
-using System;
-using System.IO;
-using System.Net.Http;
+
 using System.Reflection;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Serilog.Extensions.Logging;
+
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
