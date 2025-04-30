@@ -1,10 +1,13 @@
 // VoiceAssistant.Service/Services/ServiceManager.cs
 
-
+using System;
+using System.IO;
 using System.Reflection;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
-
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
@@ -13,7 +16,7 @@ using VoiceAssistant.Core.Models;
 using VoiceAssistant.Core.Models.Exceptions;
 using VoiceAssistant.Core.Services;
 
-// Fixed: changed from Whisper.NET.Native to proper namespaces
+// Whisper imports
 using Whisper.net;
 using Whisper.net.Ggml;
 
@@ -24,10 +27,11 @@ namespace VoiceAssistant.Service.Services
     /// </summary>
     public class ServiceManager
     {
-        private IServiceProvider _serviceProvider;
-        private ILogger<ServiceManager> _logger;
-        private IAssistantService _assistantService;
-        private IIpcService _ipcService;
+        private readonly IServiceProvider _serviceProvider;
+        private readonly ILogger<ServiceManager> _logger;
+        private readonly IAssistantService _assistantService;
+        private readonly IIpcService _ipcService;
+        private readonly IConfiguration _configuration;
         private CancellationTokenSource _cts;
         private bool _isStarted = false;
         private int _startAttempts = 0;
@@ -38,7 +42,47 @@ namespace VoiceAssistant.Service.Services
         /// </summary>
         public ServiceManager()
         {
-            ConfigureServices();
+            // Setup configuration before anything else
+            _configuration = CreateConfiguration();
+            
+            // Configure Serilog from configuration
+            ConfigureSerilog(_configuration);
+            
+            // Configure and build service provider
+            _serviceProvider = ConfigureServices(_configuration);
+            
+            // Get required services
+            _logger = _serviceProvider.GetRequiredService<ILogger<ServiceManager>>();
+            _assistantService = _serviceProvider.GetRequiredService<IAssistantService>();
+            _ipcService = _serviceProvider.GetRequiredService<IIpcService>();
+            
+            _logger.LogInformation("ServiceManager initialized successfully");
+        }
+        
+        /// <summary>
+        /// Creates the configuration from appsettings.json
+        /// </summary>
+        private static IConfiguration CreateConfiguration()
+        {
+            string basePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            
+            return new ConfigurationBuilder()
+                .SetBasePath(basePath)
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                .AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production"}.json", optional: true)
+                .Build();
+        }
+        
+        /// <summary>
+        /// Configures Serilog from configuration
+        /// </summary>
+        private static void ConfigureSerilog(IConfiguration configuration)
+        {
+            var logConfig = new LoggerConfiguration()
+                .ReadFrom.Configuration(configuration);
+                
+            Log.Logger = logConfig.CreateLogger();
+            Log.Information("Logging configured. Starting Voice Assistant...");
         }
 
         /// <summary>
@@ -58,89 +102,57 @@ namespace VoiceAssistant.Service.Services
                 _startAttempts++;
                 _logger.LogInformation("Voice Assistant Service starting (Attempt {Attempt}/{MaxAttempts})", 
                     _startAttempts, MAX_START_ATTEMPTS);
-                
+                    
                 _cts = new CancellationTokenSource();
 
-                // First, ensure required directories exist
-                EnsureDirectoriesExist();
+                // Verify models before starting
+                VerifyAndDownloadModelsAsync(_cts.Token).Wait();
 
-                // Create a task to start services asynchronously
-                var startTask = Task.Run(async () =>
+                // Start the IPC service asynchronously without waiting for client connection
+                Task.Run(async () =>
                 {
                     try
                     {
-                        // Verify model paths and download if needed
-                        bool modelsReady = await VerifyAndDownloadModelsAsync(_cts.Token);
-                        if (!modelsReady)
-                        {
-                            _logger.LogError("Required models are missing and could not be downloaded");
-                            return false;
-                        }
-
-                        _logger.LogInformation("Starting IPC service as server");
+                        // Start IPC service
                         await _ipcService.StartAsync(true, _cts.Token);
-                        
                         _ipcService.MessageReceived += OnIpcMessageReceived;
-                        _logger.LogInformation("IPC service started successfully");
+                        _logger.LogInformation("IPC service started as server");
 
                         // Subscribe to assistant events for IPC notifications
                         _assistantService.StateChanged += OnAssistantStateChanged;
                         _assistantService.CommandProcessed += OnCommandProcessed;
 
                         // Start the assistant service
-                        _logger.LogInformation("Starting assistant service");
                         await _assistantService.StartAsync(_cts.Token);
                         _logger.LogInformation("Assistant service started successfully");
-                        
-                        return true;
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Error starting services");
-                        return false;
+                        _logger.LogError(ex, "Error in background service initialization");
+                        // Don't rethrow - let the service keep running and retry later
                     }
                 });
 
-                // Wait for the services to start with a timeout
-                if (startTask.Wait(TimeSpan.FromSeconds(30)))
-                {
-                    bool result = startTask.Result;
-                    
-                    if (result)
-                    {
-                        _isStarted = true;
-                        _logger.LogInformation("Voice Assistant Service started successfully");
-                        return true;
-                    }
-                    else
-                    {
-                        _logger.LogError("Failed to start Voice Assistant Service");
-                        // Try to clean up if possible
-                        CleanupAfterFailedStart();
-                        
-                        // If we've tried enough times, give up
-                        if (_startAttempts >= MAX_START_ATTEMPTS)
-                        {
-                            _logger.LogError("Maximum start attempts reached. Giving up.");
-                            return false;
-                        }
-                        
-                        // Otherwise try again
-                        _logger.LogInformation("Retrying service start...");
-                        return Start();
-                    }
-                }
-                else
-                {
-                    _logger.LogError("Timeout waiting for service to start");
-                    CleanupAfterFailedStart();
-                    return false;
-                }
+                // Return true immediately to tell Windows the service started successfully
+                _logger.LogInformation("Voice Assistant Service started successfully");
+                _isStarted = true;
+                return true;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to start Voice Assistant Service");
+                
+                // Cleanup after failed start
                 CleanupAfterFailedStart();
+                
+                // Retry if we haven't exceeded max attempts
+                if (_startAttempts < MAX_START_ATTEMPTS)
+                {
+                    _logger.LogInformation("Retrying service start in 5 seconds...");
+                    Thread.Sleep(5000);
+                    return Start();
+                }
+                
                 return false;
             }
         }
@@ -237,15 +249,18 @@ namespace VoiceAssistant.Service.Services
                 _cts?.Dispose();
                 _cts = null;
                 
+                // Reset logger before disposing to avoid NullReferenceException in finally block
+                var logger = _logger;
+                
                 // Dispose service provider to clean up all services
                 try
                 {
                     (_serviceProvider as IDisposable)?.Dispose();
-                    _logger.LogDebug("Service provider disposed");
+                    logger?.LogDebug("Service provider disposed");
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error disposing service provider");
+                    logger?.LogError(ex, "Error disposing service provider");
                 }
             }
         }
@@ -432,60 +447,39 @@ namespace VoiceAssistant.Service.Services
             {
                 string basePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
                 
+                // Get file paths from configuration
+                string speechRecognitionModelRelPath = _configuration.GetValue<string>("VoiceAssistant:SpeechRecognition:ModelPath");
+                string wakeWordModelRelPath = _configuration.GetValue<string>("VoiceAssistant:WakeWord:ModelPath");
+                
+                // Ensure paths are absolute
+                string modelPath = Path.IsPathRooted(speechRecognitionModelRelPath) 
+                    ? speechRecognitionModelRelPath 
+                    : Path.Combine(basePath, speechRecognitionModelRelPath);
+                    
+                string keywordPath = Path.IsPathRooted(wakeWordModelRelPath)
+                    ? wakeWordModelRelPath
+                    : Path.Combine(basePath, wakeWordModelRelPath);
+                
                 // Check Whisper model
-                string modelPath = Path.Combine(basePath, "Models", "ggml-base.bin");
                 if (File.Exists(modelPath))
                 {
                     _logger.LogInformation("Whisper model found at {ModelPath}", modelPath);
                 }
                 else
                 {
-                    _logger.LogWarning("Whisper model not found at {ModelPath}. Attempting to download...", modelPath);
-                    
-                    try
-                    {
-                        // This is where you would actually download and save the model
-                        // For safety, we're not implementing the actual download here
-                        // Instead, we'll log a message and provide instructions
-                        
-                        _logger.LogError("Automatic downloading of models is not implemented.");
-                        _logger.LogError("Please download the Whisper model manually and place it at: {ModelPath}", modelPath);
-                        _logger.LogError("You can download the ggml-base.bin model from: https://huggingface.co/ggerganov/whisper.cpp");
-                        
-                        return false;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error downloading Whisper model");
-                        return false;
-                    }
+                    _logger.LogWarning("Whisper model not found at {ModelPath}", modelPath);
+                    return false;
                 }
                 
                 // Check wake word model
-                string keywordPath = Path.Combine(basePath, "Keywords", "wake_up.ppn");
                 if (File.Exists(keywordPath))
                 {
                     _logger.LogInformation("Wake word model found at {KeywordPath}", keywordPath);
                 }
                 else
                 {
-                    _logger.LogWarning("Wake word model not found at {KeywordPath}. Attempting to download...", keywordPath);
-                    
-                    try
-                    {
-                        // This is where you would actually download and save the model
-                        // For safety, we're not implementing the actual download here
-                        
-                        _logger.LogError("Automatic downloading of wake word models is not implemented.");
-                        _logger.LogError("Please obtain a wake_up.ppn file from Picovoice (https://picovoice.ai) and place it at: {KeywordPath}", keywordPath);
-                        
-                        return false;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error downloading wake word model");
-                        return false;
-                    }
+                    _logger.LogWarning("Wake word model not found at {KeywordPath}", keywordPath);
+                    return false;
                 }
                 
                 return true;
@@ -526,11 +520,17 @@ namespace VoiceAssistant.Service.Services
             }
         }
 
-        private void ConfigureServices()
+        /// <summary>
+        /// Configures the service collection and builds the service provider
+        /// </summary>
+        private IServiceProvider ConfigureServices(IConfiguration configuration)
         {
             try
             {
                 var services = new ServiceCollection();
+
+                // Add configuration
+                services.AddSingleton(configuration);
 
                 // Add logging
                 services.AddLogging(builder =>
@@ -538,70 +538,98 @@ namespace VoiceAssistant.Service.Services
                     builder.AddSerilog(dispose: true);
                 });
 
-                // Base path for files
-                string basePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                string keywordPath = Path.Combine(basePath, "Keywords", "wake_up.ppn");
-                string modelPath = Path.Combine(basePath, "Models", "ggml-base.bin");
+                // Ensure required directories exist
+                EnsureDirectoriesExist();
 
-                // Register services
-                services.AddSingleton<IAudioCaptureService, AudioCaptureService>();
+                // Get file paths from configuration
+                string basePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
                 
-                // Wake word service
+                string speechRecognitionModelRelPath = configuration.GetValue<string>("VoiceAssistant:SpeechRecognition:ModelPath");
+                string wakeWordModelRelPath = configuration.GetValue<string>("VoiceAssistant:WakeWord:ModelPath");
+                
+                // Ensure paths are absolute
+                string modelPath = Path.IsPathRooted(speechRecognitionModelRelPath) 
+                    ? speechRecognitionModelRelPath 
+                    : Path.Combine(basePath, speechRecognitionModelRelPath);
+                    
+                string keywordPath = Path.IsPathRooted(wakeWordModelRelPath)
+                    ? wakeWordModelRelPath
+                    : Path.Combine(basePath, wakeWordModelRelPath);
+
+                // Get other configuration values
+                string picovoiceApiKey = configuration.GetValue<string>("VoiceAssistant:WakeWord:AccessKey") ?? "";
+                float wakeWordSensitivity = configuration.GetValue<float>("VoiceAssistant:WakeWord:Sensitivity", 0.7f);
+                string whisperModelType = configuration.GetValue<string>("VoiceAssistant:SpeechRecognition:ModelType", "Base");
+                string ipcPipeName = configuration.GetValue<string>("VoiceAssistant:IPC:PipeName", "VoiceAssistantPipe");
+                int sampleRate = configuration.GetValue<int>("VoiceAssistant:AudioCapture:SampleRate", 16000);
+                int channels = configuration.GetValue<int>("VoiceAssistant:AudioCapture:Channels", 1);
+                int deviceNumber = configuration.GetValue<int>("VoiceAssistant:AudioCapture:DeviceNumber", 0);
+                int bufferMs = configuration.GetValue<int>("VoiceAssistant:AudioCapture:BufferMilliseconds", 50);
+
+                // Register services with configuration
+                services.AddSingleton<IAudioCaptureService, AudioCaptureService>();
+
+                // Wake word service with configuration
                 services.AddSingleton<IWakeWordService>(sp => 
                 {
                     var logger = sp.GetRequiredService<ILogger<PorcupineWakeWordService>>();
                     
-                    if (!File.Exists(keywordPath))
-                    {
-                        logger.LogError("Wake word model file not found at: {KeywordPath}", keywordPath);
-                        throw new FileNotFoundException($"Wake word model file not found", keywordPath);
-                    }
-                    
-                    return new PorcupineWakeWordService(
+                    logger.LogInformation("PorcupineWakeWordService created with keyword path: {KeywordPath}, sensitivity: {Sensitivity}", 
+                        keywordPath, wakeWordSensitivity);
+                        
+                    var service = new PorcupineWakeWordService(
                         logger,
-                        "YOUR_PICOVOICE_API_KEY_HERE", // Replace with your API key or empty string for demo mode
+                        picovoiceApiKey,
                         keywordPath);
+                        
+                    service.SetSensitivity(wakeWordSensitivity);
+                    return service;
                 });
                     
-                // Speech recognition service
+                // Speech recognition service with configuration
                 services.AddSingleton<ISpeechRecognitionService>(sp => 
                 {
                     var logger = sp.GetRequiredService<ILogger<WhisperSpeechRecognitionService>>();
                     
-                    if (!File.Exists(modelPath))
+                    // Convert string model type to enum
+                    GgmlType ggmlType = whisperModelType.ToLowerInvariant() switch
                     {
-                        logger.LogError("Whisper model file not found at: {ModelPath}", modelPath);
-                        throw new FileNotFoundException($"Whisper model file not found", modelPath);
-                    }
+                        "tiny" => GgmlType.Tiny,
+                        "base" => GgmlType.Base,
+                        "small" => GgmlType.Small,
+                        "medium" => GgmlType.Medium,
+                        // Removed the "large" case as it is not valid for this version
+                        _ => GgmlType.Base
+                    };
                     
+                    logger.LogInformation("WhisperSpeechRecognitionService created with model type {ModelType} at path {ModelPath}", 
+                        ggmlType, modelPath);
+                        
                     return new WhisperSpeechRecognitionService(
                         logger,
                         modelPath,
-                        GgmlType.Base);
+                        ggmlType);
                 });
-                    
+
+                // Command processor service
                 services.AddSingleton<ICommandProcessorService, CommandProcessorService>();
+                
+                // Main assistant service
                 services.AddSingleton<IAssistantService, AssistantService>();
                 
-                // IPC service with pipe name
+                // IPC service with configured pipe name
                 services.AddSingleton<IIpcService>(sp => 
                 {
                     var logger = sp.GetRequiredService<ILogger<NamedPipeIpcService>>();
-                    return new NamedPipeIpcService(logger, "VoiceAssistantPipe");
+                    return new NamedPipeIpcService(logger, ipcPipeName);
                 });
 
-                _serviceProvider = services.BuildServiceProvider();
-
-                // Get required services
-                _logger = _serviceProvider.GetRequiredService<ILogger<ServiceManager>>();
-                _assistantService = _serviceProvider.GetRequiredService<IAssistantService>();
-                _ipcService = _serviceProvider.GetRequiredService<IIpcService>();
-                
-                _logger.LogInformation("Services configured successfully");
+                // Build and return the service provider
+                return services.BuildServiceProvider();
             }
             catch (Exception ex)
             {
-                // We don't have the logger set up yet if this fails, so use Serilog directly
+                // We may not have the logger set up yet if this fails, so use Serilog directly
                 Log.Error(ex, "Failed to configure services");
                 throw;
             }

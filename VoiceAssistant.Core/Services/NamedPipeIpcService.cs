@@ -128,7 +128,7 @@ namespace VoiceAssistant.Core.Services
             }
         }
 
-        private async Task StartServerAsync(CancellationToken cancellationToken)
+        public async Task StartServerAsync(CancellationToken cancellationToken)
         {
             _pipeServer = new NamedPipeServerStream(
                 _pipeName,
@@ -139,17 +139,36 @@ namespace VoiceAssistant.Core.Services
 
             _logger.LogInformation("IPC server created, waiting for client connection...");
             
-            // Wait for a client to connect
-            await _pipeServer.WaitForConnectionAsync(cancellationToken);
+            // Start a separate task for waiting for connection 
+            // This allows the service to start without waiting for a client
+            _connectionTask = Task.Run(async () => 
+            {
+                try
+                {
+                    // Wait for a client to connect
+                    await _pipeServer.WaitForConnectionAsync(cancellationToken);
+                    
+                    _reader = new StreamReader(_pipeServer, Encoding.UTF8);
+                    _writer = new StreamWriter(_pipeServer, Encoding.UTF8) { AutoFlush = true };
+                    
+                    _isConnected = true;
+                    _logger.LogInformation("Client connected to IPC server");
+                    
+                    // Start message loop
+                    await ReceiveMessagesAsync();
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogInformation("Waiting for client connection canceled");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error waiting for client connection");
+                }
+            }, cancellationToken);
             
-            _reader = new StreamReader(_pipeServer, Encoding.UTF8);
-            _writer = new StreamWriter(_pipeServer, Encoding.UTF8) { AutoFlush = true };
-            
-            _isConnected = true;
-            _logger.LogInformation("Client connected to IPC server");
-            
-            // Start message loop
-            _connectionTask = Task.Run(ReceiveMessagesAsync, cancellationToken);
+            // Return immediately without waiting for connection
+            // This allows the service to start successfully
         }
 
         private async Task StartClientAsync(CancellationToken cancellationToken)
