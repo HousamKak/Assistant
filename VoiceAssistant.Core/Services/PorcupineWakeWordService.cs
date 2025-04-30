@@ -22,6 +22,10 @@ namespace VoiceAssistant.Core.Services
         private int _audioProcessedCount = 0;
         private DateTime _lastWakeWordTime = DateTime.MinValue;
         private readonly TimeSpan _cooldownPeriod = TimeSpan.FromSeconds(2);
+        
+        // Add field for frame buffering
+        private readonly List<short> _bufferedPcm = new List<short>();
+        private int _frameLength;
 
         /// <inheritdoc/>
         public event EventHandler<string> WakeWordDetected;
@@ -97,7 +101,13 @@ namespace VoiceAssistant.Core.Services
                     modelPath: null,
                     sensitivities: new[] { Sensitivity }
                 );
-                _logger.LogInformation("Porcupine initialized successfully");
+                
+                // Store the required frame length
+                _frameLength = _porcupine.FrameLength;
+                _logger.LogInformation("Porcupine initialized successfully with frame length: {FrameLength}", _frameLength);
+                
+                // Clear any previously buffered data
+                _bufferedPcm.Clear();
             }
             catch (Exception ex)
             {
@@ -202,6 +212,9 @@ namespace VoiceAssistant.Core.Services
                     _logger.LogDebug("Porcupine instance disposed");
                 }
                 
+                // Clear buffered audio data
+                _bufferedPcm.Clear();
+                
                 _logger.LogInformation("Wake word detection service stopped after processing {AudioProcessedCount} audio frames", 
                     _audioProcessedCount);
             }
@@ -239,47 +252,60 @@ namespace VoiceAssistant.Core.Services
 
             try
             {
-                // Process the audio frame
-                _audioProcessedCount++;
+                // Add incoming audio data to buffer
+                _bufferedPcm.AddRange(pcmData);
                 
-                // Log occasionally to avoid flooding the logs
-                if (_audioProcessedCount % 1000 == 0)
+                bool wakeWordDetected = false;
+                
+                // Process complete frames while we have enough data
+                while (_bufferedPcm.Count >= _frameLength)
                 {
-                    _logger.LogDebug("Processed {Count} audio frames", _audioProcessedCount);
-                }
-                
-                int keywordIndex = _porcupine.Process(pcmData);
-                
-                if (keywordIndex >= 0)
-                {
-                    // Check for cooldown period to avoid multiple detections in quick succession
-                    DateTime now = DateTime.Now;
-                    if (now - _lastWakeWordTime < _cooldownPeriod)
+                    // Extract exactly one frame of audio
+                    short[] frame = _bufferedPcm.GetRange(0, _frameLength).ToArray();
+                    _bufferedPcm.RemoveRange(0, _frameLength);
+                    
+                    // Process the frame
+                    _audioProcessedCount++;
+                    
+                    // Log occasionally to avoid flooding the logs
+                    if (_audioProcessedCount % 1000 == 0)
                     {
-                        _logger.LogDebug("Wake word detected but within cooldown period ({TimeSinceLastDetection}ms). Ignoring.", 
-                            (now - _lastWakeWordTime).TotalMilliseconds);
-                        return false;
+                        _logger.LogDebug("Processed {Count} audio frames", _audioProcessedCount);
                     }
                     
-                    string keyword = "wake up"; // Default keyword name
-                    _lastWakeWordTime = now;
+                    int keywordIndex = _porcupine.Process(frame);
                     
-                    _logger.LogInformation("Wake word detected: {Keyword} (keywordIndex: {KeywordIndex})", 
-                        keyword, keywordIndex);
+                    if (keywordIndex >= 0)
+                    {
+                        // Check for cooldown period to avoid multiple detections in quick succession
+                        DateTime now = DateTime.Now;
+                        if (now - _lastWakeWordTime < _cooldownPeriod)
+                        {
+                            _logger.LogDebug("Wake word detected but within cooldown period ({TimeSinceLastDetection}ms). Ignoring.", 
+                                (now - _lastWakeWordTime).TotalMilliseconds);
+                            continue;
+                        }
                         
-                    try
-                    {
-                        WakeWordDetected?.Invoke(this, keyword);
+                        string keyword = "wake up"; // Default keyword name
+                        _lastWakeWordTime = now;
+                        
+                        _logger.LogInformation("Wake word detected: {Keyword} (keywordIndex: {KeywordIndex})", 
+                            keyword, keywordIndex);
+                            
+                        try
+                        {
+                            WakeWordDetected?.Invoke(this, keyword);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error in wake word detection event handler: {ErrorMessage}", ex.Message);
+                        }
+                        
+                        wakeWordDetected = true;
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error in wake word detection event handler: {ErrorMessage}", ex.Message);
-                    }
-                    
-                    return true;
                 }
                 
-                return false;
+                return wakeWordDetected;
             }
             catch (Exception ex)
             {
