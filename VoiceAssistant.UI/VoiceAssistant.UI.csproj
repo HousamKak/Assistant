@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VoiceAssistant.Core\VoiceAssistant.Core.csproj" />
+    <Resource Include="resources\microphone.ico" />
   </ItemGroup>
 
   <ItemGroup>
