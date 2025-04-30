@@ -1,4 +1,3 @@
-
 // VoiceAssistant.Core/Models/IpcMessage.cs
 using System;
 
@@ -30,7 +29,7 @@ namespace VoiceAssistant.Core.Models
         /// <summary>
         /// Gets or sets the message content, typically serialized as JSON.
         /// </summary>
-        public string Content { get; set; }
+        public string Content { get; set; } = string.Empty;
         
         /// <summary>
         /// Gets or sets the timestamp when the message was created.
@@ -43,7 +42,7 @@ namespace VoiceAssistant.Core.Models
         public IpcMessage()
         {
         }
-        
+
         /// <summary>
         /// Initializes a new instance of the IpcMessage class with specified type and content.
         /// </summary>
@@ -55,5 +54,6 @@ namespace VoiceAssistant.Core.Models
             Content = content;
             Timestamp = DateTime.Now;
         }
+
     }
 }

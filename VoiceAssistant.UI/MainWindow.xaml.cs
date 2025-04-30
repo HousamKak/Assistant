@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using VoiceAssistant.Core.Interfaces;
 using VoiceAssistant.Core.Models;
 using VoiceAssistant.UI.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace VoiceAssistant.UI
 {

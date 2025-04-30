@@ -1,4 +1,3 @@
-
 // VoiceAssistant.Core/Models/Command.cs
 using System;
 using System.Collections.Generic;
@@ -18,17 +17,17 @@ namespace VoiceAssistant.Core.Models
         /// <summary>
         /// Gets or sets the trigger phrase that activates this command.
         /// </summary>
-        public string Trigger { get; set; }
+        public string Trigger { get; set; } = string.Empty;
         
         /// <summary>
         /// Gets or sets the description of what the command does.
         /// </summary>
-        public string Description { get; set; }
+        public string Description { get; set; } = string.Empty;
         
         /// <summary>
         /// Gets or sets the full text of the command as transcribed.
         /// </summary>
-        public string FullText { get; set; }
+        public string FullText { get; set; } = string.Empty;
         
         /// <summary>
         /// Gets or sets the timestamp when the command was received.
@@ -60,5 +59,6 @@ namespace VoiceAssistant.Core.Models
             Trigger = trigger ?? throw new ArgumentNullException(nameof(trigger));
             Description = description;
         }
+
     }
 }
