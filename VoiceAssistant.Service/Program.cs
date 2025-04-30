@@ -3,6 +3,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using Serilog;
 using Serilog.Events;
 using Topshelf;
@@ -18,8 +19,14 @@ namespace VoiceAssistant.Service
 
         public static void Main(string[] args)
         {
+            // Load configuration
+            var configuration = new ConfigurationBuilder()
+                .SetBasePath(AppDomain.CurrentDomain.BaseDirectory)
+                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+                .Build();
+
             // Configure logging first
-            ConfigureSerilog();
+            ConfigureSerilog(configuration);
 
             // Check if running in console mode
             _isConsoleMode = Array.Exists(args, arg => arg.Equals("--console", StringComparison.OrdinalIgnoreCase));
@@ -34,19 +41,14 @@ namespace VoiceAssistant.Service
             }
         }
 
-        private static void ConfigureSerilog()
+        private static void ConfigureSerilog(IConfiguration configuration)
         {
-            Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Information()
-                .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
-                .Enrich.FromLogContext()
-                .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
-                .WriteTo.File("logs/voice-assistant-.log", 
-                    rollingInterval: RollingInterval.Day,
-                    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
-                .CreateLogger();
+            var logConfig = new LoggerConfiguration()
+                .ReadFrom.Configuration(configuration)
+                .WriteTo.Console(); // add this back
 
-            Log.Information("Logging configured. Starting Voice Assistant...");
+            Log.Logger = logConfig.CreateLogger();
+            Log.Information("Logging configured for ServiceManager…");
         }
 
         private static void RunAsConsole()
