@@ -1,8 +1,7 @@
 // VoiceAssistant.Core/Services/WhisperSpeechRecognitionService.cs
-using System;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
+
+
+using System.Text;
 using Microsoft.Extensions.Logging;
 using NAudio.Wave;
 using VoiceAssistant.Core.Interfaces;
@@ -15,48 +14,36 @@ namespace VoiceAssistant.Core.Services
     /// <summary>
     /// Implementation of speech recognition using OpenAI's Whisper via Whisper.NET.
     /// </summary>
-    public class WhisperSpeechRecognitionService : ISpeechRecognitionService
+    public class WhisperSpeechRecognitionService : ISpeechRecognitionService, IDisposable
     {
         private readonly ILogger<WhisperSpeechRecognitionService> _logger;
         private WhisperFactory _whisperFactory;
-        private IWhisperProcessor _whisperProcessor;
         private bool _disposed;
         private readonly string _modelPath;
         private readonly GgmlType _modelType;
 
-        /// <inheritdoc/>
         public event EventHandler<string> SpeechRecognized;
+        public bool IsReady => _whisperFactory != null;
 
-        /// <inheritdoc/>
-        public bool IsReady => _whisperProcessor != null;
-
-        /// <summary>
-        /// Initializes a new instance of the WhisperSpeechRecognitionService class.
-        /// </summary>
-        /// <param name="logger">The logger instance.</param>
-        /// <param name="modelPath">Path to the Whisper model file.</param>
-        /// <param name="modelType">Type of Whisper model to use.</param>
-        /// <exception cref="ArgumentNullException">Thrown when logger or modelPath is null.</exception>
         public WhisperSpeechRecognitionService(
             ILogger<WhisperSpeechRecognitionService> logger,
             string modelPath,
             GgmlType modelType = GgmlType.Base)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            
-            if (string.IsNullOrEmpty(modelPath))
+
+            if (string.IsNullOrWhiteSpace(modelPath))
                 throw new ArgumentNullException(nameof(modelPath));
-                
+
             _modelPath = modelPath;
             _modelType = modelType;
         }
 
-        /// <inheritdoc/>
         public async Task InitializeAsync(CancellationToken cancellationToken = default)
         {
             if (IsReady)
             {
-                _logger.LogWarning("Attempted to initialize speech recognition service when already initialized");
+                _logger.LogWarning("Whisper already initialized.");
                 return;
             }
 
@@ -64,135 +51,97 @@ namespace VoiceAssistant.Core.Services
             {
                 await Task.Run(() =>
                 {
-                    _logger.LogInformation("Initializing Whisper with model {ModelType} from {ModelPath}", 
+                    _logger.LogInformation("Loading Whisper model {ModelType} from {ModelPath}",
                         _modelType, _modelPath);
-                    
-                    // Check if model file exists
+
                     if (!File.Exists(_modelPath))
-                    {
-                        throw new SpeechRecognitionException($"Whisper model file not found at path: {_modelPath}");
-                    }
-                        
+                        throw new SpeechRecognitionException($"Model not found at {_modelPath}");
+
                     _whisperFactory = WhisperFactory.FromPath(_modelPath);
-                    _whisperProcessor = _whisperFactory.CreateBuilder()
-                        .WithLanguage("en")
-                        .WithTranslate(false)
-                        .Build();
-                        
-                    _logger.LogInformation("Whisper speech recognition service initialized");
+                    _logger.LogInformation("Whisper model loaded successfully.");
                 }, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to initialize Whisper speech recognition");
-                throw new SpeechRecognitionException("Failed to initialize speech recognition service", ex);
+                _logger.LogError(ex, "Failed to initialize Whisper");
+                throw new SpeechRecognitionException("Initialization error", ex);
             }
         }
 
-        /// <inheritdoc/>
         public async Task<string> TranscribeAsync(byte[] audioData, CancellationToken cancellationToken = default)
         {
             if (!IsReady)
-            {
-                throw new InvalidOperationException("Speech recognition service is not initialized. Call InitializeAsync first.");
-            }
+                throw new InvalidOperationException("Service not initialized. Call InitializeAsync first.");
 
-            try
+            return await Task.Run(async () =>
             {
-                string transcription = await Task.Run(() =>
+                using var memoryStream = new MemoryStream(audioData);
+
+                try
                 {
-                    using var memoryStream = new MemoryStream(audioData);
-                    
-                    try
+                    using var wav = new WaveFileReader(memoryStream);
+
+                    // ensure correct format
+                    if (wav.WaveFormat.SampleRate != 16000
+                        || wav.WaveFormat.BitsPerSample != 16
+                        || wav.WaveFormat.Channels != 1)
                     {
-                        using var wavStream = new WaveFileReader(memoryStream);
-                        
-                        // Ensure audio is in the correct format (16kHz, 16-bit, mono)
-                        var format = wavStream.WaveFormat;
-                        if (format.SampleRate != 16000 || format.BitsPerSample != 16 || format.Channels != 1)
-                        {
-                            _logger.LogWarning("Audio format conversion required: {CurrentFormat} to 16kHz, 16-bit, mono", format);
-                            
-                            using var convertedStream = new MemoryStream();
-                            using var resampler = new MediaFoundationResampler(wavStream, new WaveFormat(16000, 16, 1));
-                            WaveFileWriter.WriteWavFileToStream(convertedStream, resampler);
-                            convertedStream.Position = 0;
-                            
-                            return TranscribeWavStream(convertedStream);
-                        }
-                        
-                        // Already in correct format
-                        memoryStream.Position = 0;
-                        return TranscribeWavStream(memoryStream);
+                        _logger.LogWarning("Converting audio to 16kHz, 16-bit, mono");
+                        using var converted = new MemoryStream();
+                        using var resampler = new MediaFoundationResampler(wav, new WaveFormat(16000, 16, 1));
+                        WaveFileWriter.WriteWavFileToStream(converted, resampler);
+                        converted.Position = 0;
+                        return await TranscribeWavStreamAsync(converted);
                     }
-                    catch (FormatException ex)
-                    {
-                        _logger.LogError(ex, "Invalid audio format");
-                        throw new SpeechRecognitionException("Invalid audio format. Ensure the audio is in WAV format.", ex);
-                    }
-                }, cancellationToken);
-                
-                if (!string.IsNullOrWhiteSpace(transcription))
-                {
-                    _logger.LogInformation("Transcription completed: {Transcription}", transcription);
-                    SpeechRecognized?.Invoke(this, transcription);
+
+                    memoryStream.Position = 0;
+                    return await TranscribeWavStreamAsync(memoryStream);
                 }
-                else
+                catch (FormatException fx)
                 {
-                    _logger.LogWarning("No transcription result");
+                    _logger.LogError(fx, "Invalid WAV format");
+                    throw new SpeechRecognitionException("Invalid WAV format", fx);
                 }
-                
-                return transcription;
-            }
-            catch (Exception ex) when (
-                !(ex is SpeechRecognitionException || ex is OperationCanceledException))
-            {
-                _logger.LogError(ex, "Error transcribing audio");
-                throw new SpeechRecognitionException("Error during speech transcription", ex);
-            }
+            }, cancellationToken);
         }
 
-        private string TranscribeWavStream(Stream wavStream)
+        private async Task<string> TranscribeWavStreamAsync(Stream wavStream)
         {
-            string result = string.Empty;
-            wavStream.Position = 0; // Ensure we're at the start of the stream
-            
-            _whisperProcessor.Process(wavStream, segment =>
+            var sb = new StringBuilder();
+            wavStream.Position = 0;
+
+            // create a fresh processor for each call
+            using var processor = _whisperFactory.CreateBuilder()
+                .WithLanguage("en")
+                // If you want translation, uncomment the next line:
+                // .WithTranslate()
+                .Build();
+
+            await foreach (var segment in processor.ProcessAsync(wavStream))
             {
-                result += segment.Text;
-                return true; // Continue processing
-            });
-            
-            // Clean up the result
-            return result.Trim();
+                sb.Append(segment.Text);
+            }
+
+            var transcription = sb.ToString().Trim();
+            if (!string.IsNullOrEmpty(transcription))
+            {
+                _logger.LogInformation("Transcription: {Text}", transcription);
+                SpeechRecognized?.Invoke(this, transcription);
+            }
+            else
+            {
+                _logger.LogWarning("No speech detected.");
+            }
+
+            return transcription;
         }
 
-        /// <inheritdoc/>
         public void Dispose()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        /// <summary>
-        /// Disposes resources used by the speech recognition service.
-        /// </summary>
-        /// <param name="disposing">True if disposing managed resources.</param>
-        protected virtual void Dispose(bool disposing)
-        {
-            if (_disposed)
-                return;
-
-            if (disposing)
-            {
-                _whisperProcessor?.Dispose();
-                _whisperProcessor = null;
-                
-                _whisperFactory?.Dispose();
-                _whisperFactory = null;
-            }
-
+            if (_disposed) return;
+            _whisperFactory?.Dispose();
             _disposed = true;
+            GC.SuppressFinalize(this);
         }
     }
 }

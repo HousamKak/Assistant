@@ -1,16 +1,14 @@
 // VoiceAssistant.Service/Services/ServiceManager.cs
-using System;
-using System.IO;
+
 using System.Reflection;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
+
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using VoiceAssistant.Core.Interfaces;
 using VoiceAssistant.Core.Models;
 using VoiceAssistant.Core.Services;
-using VoiceAssistant.Core.Utilities;
+
 // Fixed: changed from Whisper.NET.Native to proper namespaces
 using Whisper.net;
 using Whisper.net.Ggml;
@@ -52,8 +50,8 @@ namespace VoiceAssistant.Service.Services
                 {
                     try
                     {
-                        // Download Whisper model if needed
-                        await EnsureWhisperModelExistsAsync();
+                        // Verify existing model path
+                        VerifyWhisperModelPath();
 
                         await _ipcService.StartAsync(true, _cts.Token);
                         _ipcService.MessageReceived += OnIpcMessageReceived;
@@ -189,25 +187,25 @@ namespace VoiceAssistant.Service.Services
             }
         }
 
-        private async Task EnsureWhisperModelExistsAsync()
+        private void VerifyWhisperModelPath()
         {
             try
             {
                 string basePath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
                 string modelPath = Path.Combine(basePath, "Models", "ggml-base.bin");
                 
-                // Create a downloader instance
-                var modelDownloader = new WhisperModelDownloader(
-                    _serviceProvider.GetRequiredService<ILogger<WhisperModelDownloader>>());
-                    
-                // Ensure the model exists
-                await modelDownloader.EnsureModelExistsAsync(modelPath, GgmlType.Base);
+                if (File.Exists(modelPath))
+                {
+                    _logger.LogInformation("Found Whisper model at {ModelPath}", modelPath);
+                }
+                else
+                {
+                    _logger.LogWarning("Whisper model not found at {ModelPath}. Speech recognition may not work.", modelPath);
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to download Whisper model. Speech recognition may not work.");
-                // Don't rethrow - we'll continue without the model and let the speech recognition
-                // service handle the error when it tries to initialize
+                _logger.LogError(ex, "Error verifying Whisper model path");
             }
         }
 
@@ -247,7 +245,6 @@ namespace VoiceAssistant.Service.Services
             services.AddSingleton<ICommandProcessorService, CommandProcessorService>();
             services.AddSingleton<IAssistantService, AssistantService>();
             services.AddSingleton<IIpcService, NamedPipeIpcService>();
-            services.AddSingleton<WhisperModelDownloader>();
 
             _serviceProvider = services.BuildServiceProvider();
 

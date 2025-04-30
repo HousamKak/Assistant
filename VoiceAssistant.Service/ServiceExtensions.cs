@@ -1,11 +1,6 @@
-using System;
-// Fix: Added necessary using directives
+
 using Serilog;
-using Serilog.Events;
-using Serilog.Sinks.File;
-using Topshelf;
-using Topshelf.Logging;
-using Topshelf.ServiceConfigurators;
+using Topshelf.HostConfigurators;
 
 namespace VoiceAssistant.Service
 {
@@ -30,9 +25,6 @@ namespace VoiceAssistant.Service
                 .WriteTo.File("logs/voice-assistant-.log", rollingInterval: Serilog.RollingInterval.Day)
                 .WriteTo.Console()
                 .CreateLogger();
-
-            // Fix: Use Topshelf's UseSerilog method correctly
-            configurator.UseSerilogLogging();
             
             return configurator;
         }

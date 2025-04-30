@@ -1,17 +1,8 @@
 ﻿// VoiceAssistant.Service/Program.cs
-using System;
-using System.IO;
-using System.Reflection;
-using System.Threading.Tasks;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+
 using Topshelf;
-using VoiceAssistant.Core.Interfaces;
-using VoiceAssistant.Core.Services;
 using VoiceAssistant.Service.Services;
 
-using Whisper.net;
-using Whisper.net.Ggml;
 
 namespace VoiceAssistant.Service
 {
