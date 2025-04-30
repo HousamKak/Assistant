@@ -1,5 +1,5 @@
+// VoiceAssistant.Service/ServiceExtensions.cs
 
-using Serilog;
 using Topshelf.HostConfigurators;
 
 namespace VoiceAssistant.Service
@@ -19,12 +19,15 @@ namespace VoiceAssistant.Service
             if (configurator == null)
                 throw new ArgumentNullException(nameof(configurator));
 
-            // Configure Serilog
-            Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Information()
-                .WriteTo.File("logs/voice-assistant-.log", rollingInterval: Serilog.RollingInterval.Day)
-                .WriteTo.Console()
-                .CreateLogger();
+            // Ensure log directory exists
+            string logDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
+            if (!Directory.Exists(logDirectory))
+            {
+                Directory.CreateDirectory(logDirectory);
+            }
+
+            // Use the logger that was already configured in Program.cs
+            configurator.UseSerilog();
             
             return configurator;
         }
