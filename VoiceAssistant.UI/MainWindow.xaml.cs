@@ -311,8 +311,13 @@ namespace VoiceAssistant.UI
                 // Clean up
                 _assistantUIService.StateChanged -= OnAssistantStateChanged;
                 _assistantUIService.CommandProcessed -= OnCommandProcessed;
-                _ipcService.MessageReceived -= OnIpcMessageReceived;
-                
+
+                if (_ipcService != null)
+                {
+                    _ipcService.MessageReceived -= OnIpcMessageReceived;
+                    Task.Run(async () => await _ipcService.StopAsync()).Wait();
+                }
+
                 base.OnClosing(e);
             }
         }

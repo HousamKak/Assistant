@@ -12,23 +12,6 @@
         LocationChanged="Window_LocationChanged"
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
     
-    <Window.Resources>
-        <Storyboard x:Key="PulseStoryboard" RepeatBehavior="Forever" AutoReverse="True">
-            <DoubleAnimation 
-                Storyboard.TargetName="PulseEllipse"
-                Storyboard.TargetProperty="Width"
-                From="120" To="150" Duration="0:0:1.5" />
-            <DoubleAnimation 
-                Storyboard.TargetName="PulseEllipse"
-                Storyboard.TargetProperty="Height"
-                From="120" To="150" Duration="0:0:1.5" />
-            <DoubleAnimation 
-                Storyboard.TargetName="PulseEllipse"
-                Storyboard.TargetProperty="Opacity"
-                From="0.6" To="0.3" Duration="0:0:1.5" />
-        </Storyboard>
-    </Window.Resources>
-
     <Grid>
         <!-- Main content -->
         <Grid x:Name="MainContent">
@@ -81,9 +64,27 @@
         </tb:TaskbarIcon>
     </Grid>
     
+    <Window.Resources>
+        <!-- Pulse animation -->
+        <Storyboard x:Key="PulseStoryboard" RepeatBehavior="Forever" AutoReverse="True">
+            <DoubleAnimation 
+                Storyboard.TargetName="PulseEllipse"
+                Storyboard.TargetProperty="Width"
+                From="120" To="150" Duration="0:0:1.5" />
+            <DoubleAnimation 
+                Storyboard.TargetName="PulseEllipse"
+                Storyboard.TargetProperty="Height"
+                From="120" To="150" Duration="0:0:1.5" />
+            <DoubleAnimation 
+                Storyboard.TargetName="PulseEllipse"
+                Storyboard.TargetProperty="Opacity"
+                From="0.6" To="0.3" Duration="0:0:1.5" />
+        </Storyboard>
+    </Window.Resources>
+    
     <Window.Triggers>
         <EventTrigger RoutedEvent="Window.Loaded">
-            <BeginStoryboard Storyboard="{StaticResource PulseStoryboard}" />
+            <BeginStoryboard Storyboard="{StaticResource PulseStoryboard}"/>
         </EventTrigger>
     </Window.Triggers>
 </Window>
