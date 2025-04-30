@@ -4,9 +4,86 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:VoiceAssistant.UI"
+        xmlns:tb="http://www.hardcodet.net/taskbar"
+        xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
-    <Grid>
+        Title="Voice Assistant" Height="200" Width="300"
+        Style="{StaticResource WindowStyle}"
+        LocationChanged="Window_LocationChanged"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown">
+    
+    <Window.Resources>
+        <Storyboard x:Key="PulseStoryboard" RepeatBehavior="Forever" AutoReverse="True">
+            <DoubleAnimation 
+                Storyboard.TargetName="PulseEllipse"
+                Storyboard.TargetProperty="Width"
+                From="120" To="150" Duration="0:0:1.5" />
+            <DoubleAnimation 
+                Storyboard.TargetName="PulseEllipse"
+                Storyboard.TargetProperty="Height"
+                From="120" To="150" Duration="0:0:1.5" />
+            <DoubleAnimation 
+                Storyboard.TargetName="PulseEllipse"
+                Storyboard.TargetProperty="Opacity"
+                From="0.6" To="0.3" Duration="0:0:1.5" />
+        </Storyboard>
+    </Window.Resources>
 
+    <Grid>
+        <!-- Main content -->
+        <Grid x:Name="MainContent">
+            <!-- Pulsing circle background -->
+            <Ellipse x:Name="PulseEllipse" Style="{StaticResource PulseEllipseStyle}" />
+            
+            <!-- Status icon -->
+            <materialDesign:PackIcon x:Name="StatusIcon"
+                                     Kind="Microphone"
+                                     Width="48" Height="48"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center"
+                                     Foreground="White" />
+            
+            <!-- Command bubble -->
+            <Border x:Name="CommandBubble"
+                    Style="{StaticResource CommandBubbleStyle}"
+                    Visibility="Collapsed"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,0,20">
+                <TextBlock x:Name="CommandText"
+                           Style="{StaticResource CommandTextStyle}" />
+            </Border>
+            
+            <!-- Close button -->
+            <Button x:Name="CloseButton"
+                    Width="24" Height="24"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="0,5,5,0"
+                    Style="{StaticResource MaterialDesignIconButton}"
+                    Click="CloseButton_Click">
+                <materialDesign:PackIcon Kind="Close" Width="16" Height="16" />
+            </Button>
+        </Grid>
+        
+        <!-- Taskbar icon -->
+        <tb:TaskbarIcon x:Name="TrayIcon"
+                        IconSource="/Resources/microphone.ico"
+                        ToolTipText="Voice Assistant"
+                        TrayLeftMouseDown="TrayIcon_TrayLeftMouseDown">
+            <tb:TaskbarIcon.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Show Window" Click="ShowWindow_Click" />
+                    <MenuItem Header="Settings" Click="Settings_Click" />
+                    <Separator />
+                    <MenuItem Header="Exit" Click="Exit_Click" />
+                </ContextMenu>
+            </tb:TaskbarIcon.ContextMenu>
+        </tb:TaskbarIcon>
     </Grid>
+    
+    <Window.Triggers>
+        <EventTrigger RoutedEvent="Window.Loaded">
+            <BeginStoryboard Storyboard="{StaticResource PulseStoryboard}" />
+        </EventTrigger>
+    </Window.Triggers>
 </Window>

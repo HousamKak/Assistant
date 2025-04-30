@@ -288,8 +288,8 @@ namespace VoiceAssistant.UI
 
         private void Settings_Click(object sender, RoutedEventArgs e)
         {
-            // Show settings window
-            var settingsWindow = (SettingsWindow)Application.Current.ServiceProvider.GetService(typeof(SettingsWindow));
+            // Show settings window - fixed to correctly access the service provider
+            var settingsWindow = ((App)Application.Current).ServiceProvider.GetRequiredService<SettingsWindow>();
             settingsWindow.ShowDialog();
         }
 

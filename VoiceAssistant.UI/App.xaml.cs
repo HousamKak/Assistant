@@ -26,6 +26,9 @@ namespace VoiceAssistant.UI
             _serviceProvider = services.BuildServiceProvider();
         }
 
+        // Add this public property to expose the service provider
+        public IServiceProvider ServiceProvider => _serviceProvider;
+
         private void ConfigureServices(IServiceCollection services)
         {
             // Add logging
