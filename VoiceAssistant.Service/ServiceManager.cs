@@ -1,11 +1,9 @@
 // VoiceAssistant.Service/Services/ServiceManager.cs
 
-using System;
-using System.IO;
+
 using System.Reflection;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
+
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,7 +11,6 @@ using Microsoft.Extensions.Logging;
 using Serilog;
 using VoiceAssistant.Core.Interfaces;
 using VoiceAssistant.Core.Models;
-using VoiceAssistant.Core.Models.Exceptions;
 using VoiceAssistant.Core.Services;
 
 // Whisper imports
