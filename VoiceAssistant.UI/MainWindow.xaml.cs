@@ -3,6 +3,7 @@
 
 using System;
 using System.Globalization;
+using System.IO;
 using System.Media;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -35,6 +36,9 @@ namespace VoiceAssistant.UI
         private readonly Storyboard _wakeWordDetectedStoryboard;
         private readonly Storyboard _enhancedPulseStoryboard;
         private readonly MediaPlayer _wakeWordSound = new MediaPlayer();
+        private bool _soundInitializedSuccessfully = false;
+        private int _soundPlayAttempts = 0;
+        private int _soundPlaySuccesses = 0;
 
         public MainWindow(
             ILogger<MainWindow> logger,
@@ -55,13 +59,47 @@ namespace VoiceAssistant.UI
             // Preload the wake word sound
             try
             {
-                _wakeWordSound.Open(new Uri("pack://application:,,,/Resources/omnitrix.mp3"));
+                _logger.LogInformation("=== SOUND INIT: Beginning Omnitrix sound initialization ===");
+                Console.WriteLine("=== SOUND INIT: Beginning Omnitrix sound initialization ===");
+
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string soundPath = Path.Combine(baseDir, "Resources", "omnitrix.mp3");
+                _logger.LogInformation("SOUND INIT: Using sound path: {SoundPath}", soundPath);
+                Console.WriteLine($"SOUND INIT: Using sound path: {soundPath}");
+
+                _wakeWordSound.MediaOpened += (s, e) => {
+                    _logger.LogInformation("SOUND EVENT: Media successfully opened. Duration: {Duration}", 
+                        _wakeWordSound.NaturalDuration.TimeSpan);
+                    Console.WriteLine($"SOUND EVENT: Media successfully opened. Duration: {_wakeWordSound.NaturalDuration.TimeSpan}");
+                };
+
+                _wakeWordSound.MediaEnded += (s, e) => {
+                    _logger.LogInformation("SOUND EVENT: Media playback completed");
+                    Console.WriteLine("SOUND EVENT: Media playback completed");
+                };
+
+                _wakeWordSound.MediaFailed += (s, e) => {
+                    _logger.LogError("SOUND ERROR: Media failed to load: {ErrorException}", e.ErrorException.Message);
+                    Console.WriteLine($"SOUND ERROR: Media failed to load: {e.ErrorException.Message}");
+                };
+
+                _wakeWordSound.Open(new Uri(soundPath, UriKind.Absolute));
                 _wakeWordSound.Volume = 1.0;
-                _logger.LogInformation("Omnitrex wake sound loaded successfully");
+                _soundInitializedSuccessfully = true;
+                _logger.LogInformation("SOUND INIT: Omnitrix wake sound loaded successfully");
+                Console.WriteLine("SOUND INIT: Omnitrix wake sound loaded successfully");
+
+                bool fileExists = File.Exists(soundPath);
+                _logger.LogInformation("SOUND DEBUG: Sound file expected at: {SoundPath}, Exists: {FileExists}", 
+                    soundPath, fileExists);
+                Console.WriteLine($"SOUND DEBUG: Sound file expected at: {soundPath}, Exists: {fileExists}");
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Could not load omnitrex wake sound");
+                _soundInitializedSuccessfully = false;
+                _logger.LogWarning("SOUND ERROR: Could not load omnitrix wake sound: {ErrorMessage}", ex.Message);
+                Console.WriteLine($"SOUND ERROR: Could not load omnitrix wake sound: {ex.Message}");
+                _logger.LogWarning(ex, "Full exception details for sound initialization failure");
             }
             
             // Position the window in the bottom right corner of the screen
@@ -543,11 +581,16 @@ namespace VoiceAssistant.UI
             {
                 // Reset the player and play the sound
                 _wakeWordSound.Stop();
-                _wakeWordSound.Open(new Uri("pack://application:,,,/Resources/omnitrix.mp3"));
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string soundPath = Path.Combine(baseDir, "Resources", "omnitrix.mp3");
+                _wakeWordSound.Open(new Uri(soundPath, UriKind.Absolute));
                 _wakeWordSound.Play();
+                _soundPlayAttempts++;
+                _soundPlaySuccesses++;
             }
             catch (Exception ex)
             {
+                _soundPlayAttempts++;
                 Console.WriteLine($"WARNING: Could not play omnitrex sound: {ex.Message}");
                 _logger.LogWarning(ex, "Could not play omnitrex sound, falling back to system sound");
                 
@@ -555,6 +598,7 @@ namespace VoiceAssistant.UI
                 try
                 {
                     SystemSounds.Asterisk.Play();
+                    _soundPlaySuccesses++;
                 }
                 catch (Exception soundEx)
                 {
@@ -619,11 +663,16 @@ namespace VoiceAssistant.UI
                 {
                     // Reset the player and play the sound
                     _wakeWordSound.Stop();
-                    _wakeWordSound.Open(new Uri("pack://application:,,,/Resources/omnitrix.mp3"));
+                    string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                    string soundPath = Path.Combine(baseDir, "Resources", "omnitrix.mp3");
+                    _wakeWordSound.Open(new Uri(soundPath, UriKind.Absolute));
                     _wakeWordSound.Play();
+                    _soundPlayAttempts++;
+                    _soundPlaySuccesses++;
                 }
                 catch (Exception ex)
                 {
+                    _soundPlayAttempts++;
                     Console.WriteLine($"WARNING: Could not play omnitrex sound: {ex.Message}");
                     _logger.LogWarning(ex, "Could not play omnitrex sound, falling back to system sound");
                     
@@ -631,6 +680,7 @@ namespace VoiceAssistant.UI
                     try
                     {
                         SystemSounds.Asterisk.Play();
+                        _soundPlaySuccesses++;
                     }
                     catch (Exception soundEx)
                     {
@@ -884,6 +934,52 @@ namespace VoiceAssistant.UI
             Application.Current.Shutdown();
         }
 
+        private void LogSoundStatus()
+        {
+            try {
+                _logger.LogInformation("=== SOUND STATUS REPORT ===");
+                Console.WriteLine("=== SOUND STATUS REPORT ===");
+
+                _logger.LogInformation("Sound initialized successfully: {Success}", _soundInitializedSuccessfully);
+                Console.WriteLine($"Sound initialized successfully: {_soundInitializedSuccessfully}");
+
+                _logger.LogInformation("Sound play attempts: {Attempts}", _soundPlayAttempts);
+                Console.WriteLine($"Sound play attempts: {_soundPlayAttempts}");
+
+                _logger.LogInformation("Sound play successes: {Successes}", _soundPlaySuccesses);
+                Console.WriteLine($"Sound play successes: {_soundPlaySuccesses}");
+
+                if (_soundInitializedSuccessfully) {
+                    _logger.LogInformation("MediaPlayer status - HasAudio: {HasAudio}, ScrubbingEnabled: {ScrubbingEnabled}, SpeedRatio: {SpeedRatio}",
+                        _wakeWordSound.HasAudio, _wakeWordSound.ScrubbingEnabled, _wakeWordSound.SpeedRatio);
+                    Console.WriteLine($"MediaPlayer status - HasAudio: {_wakeWordSound.HasAudio}, ScrubbingEnabled: {_wakeWordSound.ScrubbingEnabled}, SpeedRatio: {_wakeWordSound.SpeedRatio}");
+
+                    _logger.LogInformation("MediaPlayer state - Volume: {Volume}, IsMuted: {IsMuted}, Balance: {Balance}",
+                        _wakeWordSound.Volume, _wakeWordSound.IsMuted, _wakeWordSound.Balance);
+                    Console.WriteLine($"MediaPlayer state - Volume: {_wakeWordSound.Volume}, IsMuted: {_wakeWordSound.IsMuted}, Balance: {_wakeWordSound.Balance}");
+                }
+
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string soundPath = Path.Combine(baseDir, "Resources", "omnitrix.mp3");
+                bool fileExists = File.Exists(soundPath);
+                _logger.LogInformation("Sound file check - Path: {Path}, Exists: {Exists}", soundPath, fileExists);
+                Console.WriteLine($"Sound file check - Path: {soundPath}, Exists: {fileExists}");
+
+                if (fileExists) {
+                    var fileInfo = new FileInfo(soundPath);
+                    _logger.LogInformation("Sound file details - Size: {Size} bytes, Created: {Created}, Modified: {Modified}",
+                        fileInfo.Length, fileInfo.CreationTime, fileInfo.LastWriteTime);
+                    Console.WriteLine($"Sound file details - Size: {fileInfo.Length} bytes, Created: {fileInfo.CreationTime}, Modified: {fileInfo.LastWriteTime}");
+                }
+
+                _logger.LogInformation("=== END SOUND STATUS REPORT ===");
+                Console.WriteLine("=== END SOUND STATUS REPORT ===");
+            } catch (Exception ex) {
+                _logger.LogError("Error generating sound status report: {ErrorMessage}", ex.Message);
+                Console.WriteLine($"Error generating sound status report: {ex.Message}");
+            }
+        }
+
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
             if (!_isManuallyClosing)
@@ -895,8 +991,9 @@ namespace VoiceAssistant.UI
             {
                 Console.WriteLine("Closing application");
                 _logger.LogInformation("Closing application");
-                
-                // Clean up
+
+                LogSoundStatus();
+
                 _assistantUIService.StateChanged -= OnAssistantStateChanged;
                 _assistantUIService.CommandProcessed -= OnCommandProcessed;
 
@@ -905,16 +1002,18 @@ namespace VoiceAssistant.UI
                     _ipcService.MessageReceived -= OnIpcMessageReceived;
                     Task.Run(async () => await _ipcService.StopAsync()).Wait();
                 }
-                
-                // Clean up media player resources
+
                 try
                 {
                     _wakeWordSound.Stop();
                     _wakeWordSound.Close();
+                    _logger.LogInformation("SOUND CLEANUP: MediaPlayer resources released successfully");
+                    Console.WriteLine("SOUND CLEANUP: MediaPlayer resources released successfully");
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Error cleaning up media player");
+                    Console.WriteLine($"Error cleaning up media player: {ex.Message}");
                 }
 
                 base.OnClosing(e);
