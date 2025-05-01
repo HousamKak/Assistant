@@ -59,9 +59,9 @@ namespace VoiceAssistant.UI
 
             // Register services
             services.AddSingleton<IIpcService>(provider => {
-                var logger = provider.GetRequiredService<ILogger<NamedPipeIpcService>>();
-                Console.WriteLine("Creating NamedPipeIpcService with pipe name: VoiceAssistantPipe");
-                return new NamedPipeIpcService(logger, "VoiceAssistantPipe");
+                var logger = provider.GetRequiredService<ILogger<TcpIpcService>>();
+                Console.WriteLine("Creating TcpIpcService with host: 127.0.0.1, port: 5000");
+                return new TcpIpcService(logger, "127.0.0.1", 5000);
             });
             services.AddSingleton<IAssistantUIService, AssistantUIService>();
             services.AddSingleton<IStartupService, StartupService>();

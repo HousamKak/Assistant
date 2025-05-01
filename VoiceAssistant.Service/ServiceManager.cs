@@ -625,11 +625,14 @@ namespace VoiceAssistant.Service.Services
                 // Main assistant service
                 services.AddSingleton<IAssistantService, AssistantService>();
                 
-                // IPC service with configured pipe name
+                // IPC service with configured TCP parameters
                 services.AddSingleton<IIpcService>(sp => 
                 {
-                    var logger = sp.GetRequiredService<ILogger<NamedPipeIpcService>>();
-                    return new NamedPipeIpcService(logger, ipcPipeName);
+                    var logger = sp.GetRequiredService<ILogger<TcpIpcService>>();
+                    string host = configuration.GetValue<string>("VoiceAssistant:IPC:Host", "127.0.0.1");
+                    int port = configuration.GetValue<int>("VoiceAssistant:IPC:Port", 5000);
+                    logger.LogInformation("Creating TcpIpcService with host: {Host}, port: {Port}", host, port);
+                    return new TcpIpcService(logger, host, port);
                 });
 
                 // Build and return the service provider
