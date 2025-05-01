@@ -195,26 +195,14 @@ namespace VoiceAssistant.UI
                 Console.WriteLine("Beginning connection process to IPC service");
                 _logger.LogInformation("Beginning connection process to IPC service");
                 
-                // First, ensure the service is running
-                if (!_startupService.IsServiceRunning())
+                bool serviceRunning = _startupService.IsServiceRunning();
+                
+                // First attempt to connect even if we think the service isn't running
+                // The service process might be running but not properly detected
+                if (!serviceRunning)
                 {
-                    Console.WriteLine("WARNING: Voice Assistant service is not running. Attempting to start it.");
-                    _logger.LogWarning("Voice Assistant service is not running. Attempting to start it.");
-                    
-                    if (_startupService.StartService())
-                    {
-                        Console.WriteLine("Service started successfully. Waiting for it to initialize...");
-                        _logger.LogInformation("Service started successfully. Waiting for it to initialize...");
-                        // Give the service a moment to start up
-                        await Task.Delay(3000);
-                    }
-                    else
-                    {
-                        Console.WriteLine("ERROR: Failed to start Voice Assistant service");
-                        _logger.LogError("Failed to start Voice Assistant service");
-                        UpdateConnectionStatus(false, "Failed to start service");
-                        return;
-                    }
+                    Console.WriteLine("Service not detected as running, but attempting connection anyway");
+                    _logger.LogWarning("Service not detected as running, but attempting connection anyway");
                 }
                 
                 // Disconnect first if already connected
@@ -233,7 +221,7 @@ namespace VoiceAssistant.UI
                 Console.WriteLine("Starting IPC client connection to service");
                 _logger.LogInformation("Starting IPC client connection to service");
                 
-                // Connect to the service
+                // Connect to the service regardless of service detection result
                 await _ipcService.StartAsync(false);
                 
                 if (_ipcService.IsConnected)
@@ -257,6 +245,52 @@ namespace VoiceAssistant.UI
                     Console.WriteLine("WARNING: Failed to connect to voice assistant service");
                     _logger.LogWarning("Failed to connect to voice assistant service");
                     _isServiceConnected = false;
+                    
+                    // Only try to start the service if the connection failed and service isn't running
+                    if (!serviceRunning)
+                    {
+                        // Try to start the service if not running
+                        Console.WriteLine("Attempting to start service since connection failed");
+                        _logger.LogWarning("Attempting to start service since connection failed");
+                        
+                        bool started = _startupService.StartService();
+                        if (started)
+                        {
+                            Console.WriteLine("Service started successfully. Waiting for it to initialize...");
+                            _logger.LogInformation("Service started successfully. Waiting for it to initialize...");
+                            
+                            // Wait for service to start
+                            await Task.Delay(5000);
+                            
+                            // Try connecting again
+                            Console.WriteLine("Attempting connection after service start");
+                            _logger.LogInformation("Attempting connection after service start");
+                            await _ipcService.StartAsync(false);
+                            
+                            if (_ipcService.IsConnected)
+                            {
+                                Console.WriteLine("SUCCESS: Connected to voice assistant service after restart");
+                                _logger.LogInformation("Connected to voice assistant service after restart");
+                                _isServiceConnected = true;
+                                UpdateConnectionStatus(true, "Connected");
+                                
+                                // Request current state
+                                await _ipcService.SendMessageAsync(new IpcMessage
+                                {
+                                    Type = MessageType.ServiceStatus,
+                                    Content = "GetState"
+                                });
+                                
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine("ERROR: Failed to start Voice Assistant service");
+                            _logger.LogError("Failed to start Voice Assistant service");
+                        }
+                    }
+                    
                     UpdateConnectionStatus(false, "Connection failed");
                     UpdateUIForState(new AssistantState { State = ListeningState.Idle });
                 }

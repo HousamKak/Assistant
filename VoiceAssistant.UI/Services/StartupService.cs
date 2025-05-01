@@ -135,7 +135,16 @@ namespace VoiceAssistant.UI.Services
         {
             try
             {
-                // Method 1: Try to check via ServiceController (requires elevated permissions)
+                // Method 1: Check if the service process is running first - more reliable
+                var serviceProcesses = System.Diagnostics.Process.GetProcessesByName("VoiceAssistant.Service");
+                if (serviceProcesses.Length > 0)
+                {
+                    _logger.LogInformation("Service detected via process: {ProcessId}, considering it running", 
+                        serviceProcesses[0].Id);
+                    return true;
+                }
+
+                // Method 2: Try to check via ServiceController (requires elevated permissions)
                 try
                 {
                     ServiceController[] services = ServiceController.GetServices();
@@ -151,18 +160,9 @@ namespace VoiceAssistant.UI.Services
                 }
                 catch (Exception ex)
                 {
-                    // If this fails (likely due to permission issues), fall back to process checking
-                    _logger.LogWarning(ex, "Could not check service status via ServiceController, falling back to process detection");
+                    _logger.LogWarning(ex, "Could not check service status via ServiceController");
                 }
-
-                // Method 2: Check if the service process is running
-                var serviceProcesses = System.Diagnostics.Process.GetProcessesByName("VoiceAssistant.Service");
-                if (serviceProcesses.Length > 0)
-                {
-                    _logger.LogInformation("Service detected via process: {ProcessId}", serviceProcesses[0].Id);
-                    return true;
-                }
-
+                
                 _logger.LogInformation("Service not detected via any method");
                 return false;
             }

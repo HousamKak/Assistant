@@ -349,57 +349,58 @@ namespace VoiceAssistant.Core.Services
             }
 
             _pipeClient = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                        const int maxRetries = 5;         // Try more times
+            const int connectTimeoutMs = 2000; // Shorter timeout per attempt
+            int retryCount = 0;
             
-            const int connectTimeoutMs = 5000;
-            bool connected = false;
-            
-            try
+            while (retryCount < maxRetries && !cancellationToken.IsCancellationRequested)
             {
-                _logger.LogInformation("Connecting to IPC server with timeout {TimeoutMs}ms", connectTimeoutMs);
-                
-                // Use a configurable timeout for connection
-                await _pipeClient.ConnectAsync(connectTimeoutMs, cancellationToken);
-                
-                _reader = new StreamReader(_pipeClient, Encoding.UTF8);
-                _writer = new StreamWriter(_pipeClient, Encoding.UTF8) { AutoFlush = true };
-                
-                _isConnected = true;
-                connected = true;
-                _logger.LogInformation("Connected to IPC server");
-                
-                // Start message loop
-                _connectionTask = Task.Run(async () => 
+                try
                 {
-                    try
-                    {
-                        await ReceiveMessagesAsync();
-                    }
-                    finally
-                    {
-                        // Ensure we're marked as disconnected when the task ends
-                        _isConnected = false;
+                    _logger.LogInformation("Connecting to IPC server, attempt {RetryCount}/{MaxRetries} with timeout {TimeoutMs}ms", 
+                        retryCount + 1, maxRetries, connectTimeoutMs);
                         
-                        // Try to reconnect if the connection was lost unexpectedly
-                        if (!_disposed && !_reconnecting && !cancellationToken.IsCancellationRequested)
-                        {
-                            StartReconnecting();
-                        }
-                    }
-                }, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to connect to IPC server");
-                _isConnected = false;
-                
-                // Clean up if connection failed
-                if (!connected)
-                {
-                    _pipeClient?.Dispose();
-                    _pipeClient = null;
+                    // Use a shorter timeout per attempt but try more times
+                    await _pipeClient.ConnectAsync(connectTimeoutMs, cancellationToken);
+                    
+                    _reader = new StreamReader(_pipeClient, Encoding.UTF8);
+                    _writer = new StreamWriter(_pipeClient, Encoding.UTF8) { AutoFlush = true };
+                    
+                    _isConnected = true;
+                    _logger.LogInformation("Connected to IPC server successfully");
+                    
+                    // Start message loop
+                    _connectionTask = Task.Run(ReceiveMessagesAsync, cancellationToken);
+                    
+                    break;
                 }
-                
-                throw;
+                catch (TimeoutException)
+                {
+                    _logger.LogWarning("Connection attempt {RetryCount} timed out after {TimeoutMs}ms", 
+                        retryCount + 1, connectTimeoutMs);
+                    retryCount++;
+                    
+                    if (retryCount < maxRetries)
+                    {
+                        await Task.Delay(500, cancellationToken); // Short delay between attempts
+                    }
+                }
+                catch (Exception ex) when (retryCount < maxRetries - 1 && !cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning(ex, "Failed to connect to IPC server on attempt {RetryCount}, retrying...", retryCount + 1);
+                    retryCount++;
+                    await Task.Delay(500, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to connect to IPC server after {RetryCount} attempts", retryCount + 1);
+                    throw;
+                }
+            }
+            
+            if (!_isConnected && !cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException($"Failed to connect to IPC server after {maxRetries} attempts");
             }
         }
 
