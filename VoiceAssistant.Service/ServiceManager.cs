@@ -29,6 +29,7 @@ namespace VoiceAssistant.Service.Services
         private readonly IAssistantService _assistantService;
         private readonly IIpcService _ipcService;
         private readonly IConfiguration _configuration;
+        private readonly Configuration _config;
         private CancellationTokenSource _cts;
         private bool _isStarted = false;
         private int _startAttempts = 0;
@@ -52,6 +53,7 @@ namespace VoiceAssistant.Service.Services
             _logger = _serviceProvider.GetRequiredService<ILogger<ServiceManager>>();
             _assistantService = _serviceProvider.GetRequiredService<IAssistantService>();
             _ipcService = _serviceProvider.GetRequiredService<IIpcService>();
+            _config = _serviceProvider.GetRequiredService<Configuration>();
             
             _logger.LogInformation("ServiceManager initialized successfully");
         }
@@ -355,8 +357,9 @@ namespace VoiceAssistant.Service.Services
                         // Parse and apply configuration changes
                         try
                         {
-                            // Example for handling wake word sensitivity
                             var config = JsonSerializer.Deserialize<JsonElement>(message.Content);
+                            
+                            // Handle wake word sensitivity
                             if (config.TryGetProperty("WakeWordSensitivity", out JsonElement sensitivityElement))
                             {
                                 if (sensitivityElement.ValueKind == JsonValueKind.Number)
@@ -374,6 +377,95 @@ namespace VoiceAssistant.Service.Services
                                     {
                                         _logger.LogWarning("Wake word service not available");
                                     }
+                                }
+                            }
+                            
+                            // Handle response phrase
+                            if (config.TryGetProperty("WakeWordResponsePhrase", out JsonElement responseElement))
+                            {
+                                if (responseElement.ValueKind == JsonValueKind.String)
+                                {
+                                    string responsePhrase = responseElement.GetString();
+                                    _logger.LogInformation("Setting wake word response phrase to: \"{ResponsePhrase}\"", responsePhrase);
+                                    
+                                    // Update the response phrase
+                                    if (!string.IsNullOrEmpty(responsePhrase))
+                                    {
+                                        if (_config != null)
+                                        {
+                                            _config.WakeWord.ResponsePhrase = responsePhrase;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Handle text-to-speech settings
+                            if (config.TryGetProperty("TextToSpeech", out JsonElement ttsElement))
+                            {
+                                var ttsService = _serviceProvider.GetService<ITextToSpeechService>();
+                                if (ttsService != null)
+                                {
+                                    // Enable/disable TTS
+                                    if (ttsElement.TryGetProperty("Enabled", out JsonElement enabledElement) && 
+                                        (enabledElement.ValueKind == JsonValueKind.True || enabledElement.ValueKind == JsonValueKind.False))
+                                    {
+                                        bool enabled = enabledElement.GetBoolean();
+                                        _logger.LogInformation("Setting text-to-speech enabled: {Enabled}", enabled);
+                                        
+                                        if (_config != null)
+                                        {
+                                            _config.TextToSpeech.Enabled = enabled;
+                                        }
+                                    }
+                                    
+                                    // Set voice
+                                    if (ttsElement.TryGetProperty("VoiceName", out JsonElement voiceElement) && 
+                                        voiceElement.ValueKind == JsonValueKind.String)
+                                    {
+                                        string voice = voiceElement.GetString();
+                                        if (!string.IsNullOrEmpty(voice))
+                                        {
+                                            _logger.LogInformation("Setting text-to-speech voice to: {Voice}", voice);
+                                            ttsService.SetVoice(voice);
+                                            
+                                            if (_config != null)
+                                            {
+                                                _config.TextToSpeech.VoiceName = voice;
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Set rate
+                                    if (ttsElement.TryGetProperty("Rate", out JsonElement rateElement) && 
+                                        rateElement.ValueKind == JsonValueKind.Number)
+                                    {
+                                        int rate = rateElement.GetInt32();
+                                        _logger.LogInformation("Setting text-to-speech rate to: {Rate}", rate);
+                                        ttsService.SetRate(rate);
+                                        
+                                        if (_config != null)
+                                        {
+                                            _config.TextToSpeech.Rate = rate;
+                                        }
+                                    }
+                                    
+                                    // Set volume
+                                    if (ttsElement.TryGetProperty("Volume", out JsonElement volumeElement) && 
+                                        volumeElement.ValueKind == JsonValueKind.Number)
+                                    {
+                                        int volume = volumeElement.GetInt32();
+                                        _logger.LogInformation("Setting text-to-speech volume to: {Volume}", volume);
+                                        ttsService.SetVolume(volume);
+                                        
+                                        if (_config != null)
+                                        {
+                                            _config.TextToSpeech.Volume = volume;
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogWarning("Text-to-speech service not available");
                                 }
                             }
                         }
@@ -633,6 +725,36 @@ namespace VoiceAssistant.Service.Services
                     int port = configuration.GetValue<int>("VoiceAssistant:IPC:Port", 5000);
                     logger.LogInformation("Creating TcpIpcService with host: {Host}, port: {Port}", host, port);
                     return new TcpIpcService(logger, host, port);
+                });
+
+                // Register the text-to-speech service
+                services.AddSingleton<ITextToSpeechService, SystemSpeechService>();
+
+                // Register the Configuration with settings from appsettings.json
+                services.AddSingleton(sp => 
+                {
+                    var baseSettings = new Configuration();
+                    
+                    // Set wake word settings
+                    baseSettings.WakeWord.ModelPath = configuration.GetValue<string>("VoiceAssistant:WakeWord:ModelPath", "Keywords/wake_up.ppn");
+                    baseSettings.WakeWord.Sensitivity = configuration.GetValue<float>("VoiceAssistant:WakeWord:Sensitivity", 0.7f);
+                    baseSettings.WakeWord.ResponsePhrase = configuration.GetValue<string>("VoiceAssistant:WakeWord:ResponsePhrase", "Yes, I'm listening");
+                    
+                    // Set speech recognition settings
+                    baseSettings.SpeechRecognition.ModelPath = configuration.GetValue<string>("VoiceAssistant:SpeechRecognition:ModelPath", "Models/ggml-base.bin");
+                    baseSettings.SpeechRecognition.ModelType = configuration.GetValue<string>("VoiceAssistant:SpeechRecognition:ModelType", "Base");
+                    
+                    // Set audio capture settings
+                    baseSettings.AudioCapture.SampleRate = configuration.GetValue<int>("VoiceAssistant:AudioCapture:SampleRate", 16000);
+                    baseSettings.AudioCapture.Channels = configuration.GetValue<int>("VoiceAssistant:AudioCapture:Channels", 1);
+                    
+                    // Set text-to-speech settings
+                    baseSettings.TextToSpeech.Enabled = configuration.GetValue<bool>("VoiceAssistant:TextToSpeech:Enabled", true);
+                    baseSettings.TextToSpeech.VoiceName = configuration.GetValue<string>("VoiceAssistant:TextToSpeech:VoiceName", "");
+                    baseSettings.TextToSpeech.Rate = configuration.GetValue<int>("VoiceAssistant:TextToSpeech:Rate", 0);
+                    baseSettings.TextToSpeech.Volume = configuration.GetValue<int>("VoiceAssistant:TextToSpeech:Volume", 100);
+                    
+                    return baseSettings;
                 });
 
                 // Build and return the service provider

@@ -73,5 +73,30 @@ namespace VoiceAssistant.UI.Services
         /// Gets or sets the display mode.
         /// </summary>
         public string DisplayMode { get; set; } = "AlwaysVisible";
+
+        /// <summary>
+        /// Gets or sets a value indicating whether text-to-speech is enabled.
+        /// </summary>
+        public bool EnableTextToSpeech { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets the response phrase spoken when the wake word is detected.
+        /// </summary>
+        public string WakeWordResponsePhrase { get; set; } = "Yes, I'm listening";
+
+        /// <summary>
+        /// Gets or sets the name of the voice to use for text-to-speech.
+        /// </summary>
+        public string TextToSpeechVoice { get; set; } = "";
+
+        /// <summary>
+        /// Gets or sets the speech rate, from -10 (slowest) to 10 (fastest).
+        /// </summary>
+        public int TextToSpeechRate { get; set; } = 0;
+
+        /// <summary>
+        /// Gets or sets the speech volume, from 0 to 100.
+        /// </summary>
+        public int TextToSpeechVolume { get; set; } = 100;
     }
 }

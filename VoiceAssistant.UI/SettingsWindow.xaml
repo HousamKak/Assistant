@@ -93,6 +93,73 @@
                                   Margin="0,8,0,0" />
                     </StackPanel>
                 </materialDesign:Card>
+                
+                <!-- Text-to-Speech Settings -->
+                <materialDesign:Card Margin="0,0,0,16" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Text-to-Speech" 
+                                   Style="{StaticResource MaterialDesignHeadline6TextBlock}" 
+                                   Margin="0,0,0,8" />
+                        
+                        <CheckBox x:Name="EnableTtsCheckBox" 
+                                  Content="Enable speech responses" 
+                                  IsChecked="True"
+                                  Margin="0,8,0,8" />
+                        
+                        <TextBlock Text="Wake Word Response:" Margin="0,8,0,4" />
+                        <TextBox x:Name="ResponsePhraseTextBox"
+                                 Text="Yes, I'm listening"
+                                 Margin="0,0,0,8" />
+                        
+                        <TextBlock Text="Voice:" Margin="0,8,0,4" />
+                        <ComboBox x:Name="VoiceSelectionComboBox"
+                                  Margin="0,0,0,8"
+                                  DisplayMemberPath="Name"
+                                  SelectedValuePath="Name" />
+                        
+                        <TextBlock Text="Speech Rate:" Margin="0,8,0,4" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Slider x:Name="SpeechRateSlider" 
+                                    Minimum="-10" Maximum="10" 
+                                    Value="0" 
+                                    TickFrequency="1"
+                                    TickPlacement="BottomRight" 
+                                    IsSnapToTickEnabled="True" />
+                            <TextBlock Grid.Column="1" 
+                                       Text="{Binding ElementName=SpeechRateSlider, Path=Value, StringFormat=N0}" 
+                                       VerticalAlignment="Center" 
+                                       Margin="16,0,0,0" />
+                        </Grid>
+                        
+                        <TextBlock Text="Volume:" Margin="0,8,0,4" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Slider x:Name="VolumeSlider" 
+                                    Minimum="0" Maximum="100" 
+                                    Value="100" 
+                                    TickFrequency="10"
+                                    TickPlacement="BottomRight" 
+                                    IsSnapToTickEnabled="True" />
+                            <TextBlock Grid.Column="1" 
+                                       Text="{Binding ElementName=VolumeSlider, Path=Value, StringFormat=N0}" 
+                                       VerticalAlignment="Center" 
+                                       Margin="16,0,0,0" />
+                        </Grid>
+                        
+                        <Button Content="Test Speech"
+                                Style="{StaticResource MaterialDesignOutlinedButton}"
+                                HorizontalAlignment="Right"
+                                Margin="0,8,0,0"
+                                Click="TestSpeech_Click" />
+                    </StackPanel>
+                </materialDesign:Card>
             </StackPanel>
         </ScrollViewer>
         

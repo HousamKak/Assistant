@@ -65,7 +65,10 @@ namespace VoiceAssistant.UI
             });
             services.AddSingleton<IAssistantUIService, AssistantUIService>();
             services.AddSingleton<IStartupService, StartupService>();
-            
+
+            // Add text-to-speech service
+            services.AddSingleton<ITextToSpeechService, SystemSpeechService>();
+
             // Register windows
             services.AddTransient<MainWindow>();
             services.AddTransient<SettingsWindow>();

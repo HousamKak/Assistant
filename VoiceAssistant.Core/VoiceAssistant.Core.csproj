@@ -12,6 +12,7 @@
     <PackageReference Include="Porcupine" Version="3.0.10" />
     <PackageReference Include="Whisper.NET" Version="1.8.1" />
     <PackageReference Include="Whisper.NET.Runtime" Version="1.8.1" />
+    <PackageReference Include="System.Speech" Version="8.0.0" />
   </ItemGroup>
 
 </Project>

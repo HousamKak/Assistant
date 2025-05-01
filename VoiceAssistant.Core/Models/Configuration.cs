@@ -33,6 +33,11 @@ namespace VoiceAssistant.Core.Models
         /// Gets or sets the command settings.
         /// </summary>
         public CommandSettings Commands { get; set; }
+
+        /// <summary>
+        /// Gets or sets the text-to-speech settings.
+        /// </summary>
+        public TextToSpeechSettings TextToSpeech { get; set; }
         
         /// <summary>
         /// Initializes a new instance of the Configuration class with default settings.
@@ -44,6 +49,7 @@ namespace VoiceAssistant.Core.Models
             AudioCapture = new AudioCaptureSettings();
             Ui = new UiSettings();
             Commands = new CommandSettings();
+            TextToSpeech = new TextToSpeechSettings();
         }
     }
 
@@ -66,6 +72,11 @@ namespace VoiceAssistant.Core.Models
         /// Gets or sets the mapping of keyword indices to names.
         /// </summary>
         public Dictionary<int, string> KeywordMapping { get; set; } = new Dictionary<int, string> { { 0, "wake up" } };
+
+        /// <summary>
+        /// Gets or sets the response phrase spoken when the wake word is detected.
+        /// </summary>
+        public string ResponsePhrase { get; set; } = "";
     }
 
     /// <summary>
@@ -144,6 +155,32 @@ namespace VoiceAssistant.Core.Models
         /// Gets or sets a value indicating whether to start with Windows.
         /// </summary>
         public bool StartWithWindows { get; set; } = false;
+    }
+
+    /// <summary>
+    /// Settings for text-to-speech.
+    /// </summary>
+    public class TextToSpeechSettings
+    {
+        /// <summary>
+        /// Gets or sets a value indicating whether text-to-speech is enabled.
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+        
+        /// <summary>
+        /// Gets or sets the name of the voice to use.
+        /// </summary>
+        public string VoiceName { get; set; } = "";
+        
+        /// <summary>
+        /// Gets or sets the speech rate, from -10 (slowest) to 10 (fastest).
+        /// </summary>
+        public int Rate { get; set; } = 0;
+        
+        /// <summary>
+        /// Gets or sets the speech volume, from 0 to 100.
+        /// </summary>
+        public int Volume { get; set; } = 100;
     }
 
     /// <summary>

@@ -130,7 +130,7 @@ namespace VoiceAssistant.UI.Services
             
             try
             {
-                // Apply sensitivity setting via IPC
+                // Create configuration message with all settings
                 if (_ipcService.IsConnected)
                 {
                     var message = new IpcMessage
@@ -138,7 +138,15 @@ namespace VoiceAssistant.UI.Services
                         Type = MessageType.Configuration,
                         Content = JsonSerializer.Serialize(new
                         {
-                            WakeWordSensitivity = settings.WakeWordSensitivity
+                            WakeWordSensitivity = settings.WakeWordSensitivity,
+                            TextToSpeech = new 
+                            {
+                                Enabled = settings.EnableTextToSpeech,
+                                VoiceName = settings.TextToSpeechVoice,
+                                Rate = settings.TextToSpeechRate,
+                                Volume = settings.TextToSpeechVolume
+                            },
+                            WakeWordResponsePhrase = settings.WakeWordResponsePhrase
                         })
                     };
                     
