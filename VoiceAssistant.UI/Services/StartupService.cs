@@ -1,4 +1,3 @@
-
 // VoiceAssistant.UI/Services/StartupService.cs
 using System;
 using System.Diagnostics;
@@ -136,15 +135,35 @@ namespace VoiceAssistant.UI.Services
         {
             try
             {
-                ServiceController[] services = ServiceController.GetServices();
-                foreach (var service in services)
+                // Method 1: Try to check via ServiceController (requires elevated permissions)
+                try
                 {
-                    if (service.ServiceName.Equals(ServiceName, StringComparison.OrdinalIgnoreCase))
+                    ServiceController[] services = ServiceController.GetServices();
+                    foreach (var service in services)
                     {
-                        return service.Status == ServiceControllerStatus.Running;
+                        if (service.ServiceName.Equals(ServiceName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            bool isRunning = service.Status == ServiceControllerStatus.Running;
+                            _logger.LogDebug("Service status via ServiceController: {Status}", service.Status);
+                            return isRunning;
+                        }
                     }
                 }
-                
+                catch (Exception ex)
+                {
+                    // If this fails (likely due to permission issues), fall back to process checking
+                    _logger.LogWarning(ex, "Could not check service status via ServiceController, falling back to process detection");
+                }
+
+                // Method 2: Check if the service process is running
+                var serviceProcesses = System.Diagnostics.Process.GetProcessesByName("VoiceAssistant.Service");
+                if (serviceProcesses.Length > 0)
+                {
+                    _logger.LogInformation("Service detected via process: {ProcessId}", serviceProcesses[0].Id);
+                    return true;
+                }
+
+                _logger.LogInformation("Service not detected via any method");
                 return false;
             }
             catch (Exception ex)

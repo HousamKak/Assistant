@@ -28,6 +28,10 @@ namespace VoiceAssistant.Core.Services
         private bool _isConnected;
         private bool _disposed;
         private Task _connectionTask;
+        private Task _reconnectTask;
+        private bool _reconnecting;
+        private readonly int _maxRetries = 15; // More retries
+        private readonly int _retryDelayMs = 1000;
 
         /// <inheritdoc/>
         public event EventHandler<IpcMessage> MessageReceived;
@@ -45,6 +49,7 @@ namespace VoiceAssistant.Core.Services
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _pipeName = !string.IsNullOrEmpty(pipeName) ? pipeName : throw new ArgumentNullException(nameof(pipeName));
+            _logger.LogInformation("Created NamedPipeIpcService with pipe name: {PipeName}", _pipeName);
         }
 
         /// <inheritdoc/>
@@ -56,6 +61,9 @@ namespace VoiceAssistant.Core.Services
                 return;
             }
 
+            // Cancel any existing cancellation token
+            _cts?.Cancel();
+            _cts?.Dispose();
             _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _isServer = isServer;
 
@@ -82,21 +90,56 @@ namespace VoiceAssistant.Core.Services
         /// <inheritdoc/>
         public async Task StopAsync()
         {
-            if (!_isConnected)
+            if (!_isConnected && _connectionTask == null && _reconnectTask == null)
             {
                 return;
             }
 
             try
             {
+                _logger.LogInformation("Stopping IPC service");
                 _cts?.Cancel();
                 
+                // Wait for client/server tasks to complete
                 if (_connectionTask != null && !_connectionTask.IsCompleted)
                 {
-                    await _connectionTask;
+                    try
+                    {
+                        await Task.WhenAny(_connectionTask, Task.Delay(1000));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error waiting for connection task to complete");
+                    }
+                }
+                
+                if (_reconnectTask != null && !_reconnectTask.IsCompleted)
+                {
+                    try
+                    {
+                        await Task.WhenAny(_reconnectTask, Task.Delay(1000));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error waiting for reconnect task to complete");
+                    }
+                }
+                
+                // Close reader/writer
+                if (_writer != null)
+                {
+                    try 
+                    {
+                        await _writer.FlushAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error flushing writer");
+                    }
                 }
                 
                 _isConnected = false;
+                _reconnecting = false;
                 _logger.LogInformation("IPC service stopped");
             }
             catch (Exception ex)
@@ -121,6 +164,21 @@ namespace VoiceAssistant.Core.Services
                 await _writer.FlushAsync();
                 _logger.LogDebug("Sent IPC message of type {MessageType}", message.Type);
             }
+            catch (IOException ex)
+            {
+                _logger.LogError(ex, "IO error sending IPC message - pipe may be broken");
+                
+                // Mark as disconnected and try to reconnect
+                _isConnected = false;
+                
+                // Start reconnection process if we're a client
+                if (!_isServer && !_reconnecting)
+                {
+                    StartReconnecting();
+                }
+                
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error sending IPC message");
@@ -128,8 +186,113 @@ namespace VoiceAssistant.Core.Services
             }
         }
 
+        private void StartReconnecting()
+        {
+            if (_reconnecting || _disposed)
+            {
+                return;
+            }
+            
+            _reconnecting = true;
+            _reconnectTask = Task.Run(async () =>
+            {
+                _logger.LogInformation("Starting reconnection process");
+                int retryCount = 0;
+                
+                // Cleanup old connection first
+                CleanupConnection();
+                
+                while (retryCount < _maxRetries && !_disposed && _reconnecting)
+                {
+                    try
+                    {
+                        _logger.LogInformation("Attempting to reconnect, try {RetryCount}/{MaxRetries}", 
+                            retryCount + 1, _maxRetries);
+                            
+                        // Create a fresh cancellation token for this attempt
+                        var reconnectCts = new CancellationTokenSource();
+                        
+                        if (_isServer)
+                        {
+                            await StartServerAsync(reconnectCts.Token);
+                        }
+                        else
+                        {
+                            await StartClientAsync(reconnectCts.Token);
+                        }
+                        
+                        if (_isConnected)
+                        {
+                            _logger.LogInformation("Reconnection successful");
+                            _reconnecting = false;
+                            return;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Reconnection attempt {RetryCount} failed", retryCount + 1);
+                    }
+                    
+                    retryCount++;
+                    
+                    // Don't delay on the last attempt
+                    if (retryCount < _maxRetries && !_disposed && _reconnecting)
+                    {
+                        await Task.Delay(_retryDelayMs);
+                    }
+                }
+                
+                _logger.LogError("Failed to reconnect after {MaxRetries} attempts", _maxRetries);
+                _reconnecting = false;
+            });
+        }
+
+        private void CleanupConnection()
+        {
+            try
+            {
+                _logger.LogDebug("Cleaning up existing connection resources");
+                
+                _writer?.Dispose();
+                _reader?.Dispose();
+                _writer = null;
+                _reader = null;
+                
+                if (_pipeServer != null)
+                {
+                    if (_pipeServer.IsConnected)
+                    {
+                        _pipeServer.Disconnect();
+                    }
+                    _pipeServer.Dispose();
+                    _pipeServer = null;
+                }
+                
+                if (_pipeClient != null)
+                {
+                    if (_pipeClient.IsConnected)
+                    {
+                        _pipeClient.Close();
+                    }
+                    _pipeClient.Dispose();
+                    _pipeClient = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error cleaning up connection");
+            }
+        }
+
         public async Task StartServerAsync(CancellationToken cancellationToken)
         {
+            // Dispose of existing server if any
+            if (_pipeServer != null)
+            {
+                _pipeServer.Dispose();
+                _pipeServer = null;
+            }
+
             _pipeServer = new NamedPipeServerStream(
                 _pipeName,
                 PipeDirection.InOut,
@@ -165,6 +328,11 @@ namespace VoiceAssistant.Core.Services
                 {
                     _logger.LogError(ex, "Error waiting for client connection");
                 }
+                finally
+                {
+                    // Ensure we're marked as disconnected when the task ends
+                    _isConnected = false;
+                }
             }, cancellationToken);
             
             // Return immediately without waiting for connection
@@ -173,48 +341,65 @@ namespace VoiceAssistant.Core.Services
 
         private async Task StartClientAsync(CancellationToken cancellationToken)
         {
+            // Dispose of existing client if any
+            if (_pipeClient != null)
+            {
+                _pipeClient.Dispose();
+                _pipeClient = null;
+            }
+
             _pipeClient = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             
-            const int maxRetries = 10;
-            const int retryDelayMs = 1000;
-            int retryCount = 0;
+            const int connectTimeoutMs = 5000;
+            bool connected = false;
             
-            while (retryCount < maxRetries && !cancellationToken.IsCancellationRequested)
+            try
             {
-                try
+                _logger.LogInformation("Connecting to IPC server with timeout {TimeoutMs}ms", connectTimeoutMs);
+                
+                // Use a configurable timeout for connection
+                await _pipeClient.ConnectAsync(connectTimeoutMs, cancellationToken);
+                
+                _reader = new StreamReader(_pipeClient, Encoding.UTF8);
+                _writer = new StreamWriter(_pipeClient, Encoding.UTF8) { AutoFlush = true };
+                
+                _isConnected = true;
+                connected = true;
+                _logger.LogInformation("Connected to IPC server");
+                
+                // Start message loop
+                _connectionTask = Task.Run(async () => 
                 {
-                    _logger.LogInformation("Connecting to IPC server, attempt {RetryCount}/{MaxRetries}...", 
-                        retryCount + 1, maxRetries);
+                    try
+                    {
+                        await ReceiveMessagesAsync();
+                    }
+                    finally
+                    {
+                        // Ensure we're marked as disconnected when the task ends
+                        _isConnected = false;
                         
-                    await _pipeClient.ConnectAsync(5000, cancellationToken);
-                    
-                    _reader = new StreamReader(_pipeClient, Encoding.UTF8);
-                    _writer = new StreamWriter(_pipeClient, Encoding.UTF8) { AutoFlush = true };
-                    
-                    _isConnected = true;
-                    _logger.LogInformation("Connected to IPC server");
-                    
-                    // Start message loop
-                    _connectionTask = Task.Run(ReceiveMessagesAsync, cancellationToken);
-                    
-                    break;
-                }
-                catch (Exception ex) when (retryCount < maxRetries - 1 && !cancellationToken.IsCancellationRequested)
-                {
-                    _logger.LogWarning(ex, "Failed to connect to IPC server, retrying in {RetryDelayMs}ms...", retryDelayMs);
-                    retryCount++;
-                    await Task.Delay(retryDelayMs, cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to connect to IPC server after {RetryCount} attempts", retryCount + 1);
-                    throw;
-                }
+                        // Try to reconnect if the connection was lost unexpectedly
+                        if (!_disposed && !_reconnecting && !cancellationToken.IsCancellationRequested)
+                        {
+                            StartReconnecting();
+                        }
+                    }
+                }, cancellationToken);
             }
-            
-            if (!_isConnected && !cancellationToken.IsCancellationRequested)
+            catch (Exception ex)
             {
-                throw new TimeoutException($"Failed to connect to IPC server after {maxRetries} attempts");
+                _logger.LogError(ex, "Failed to connect to IPC server");
+                _isConnected = false;
+                
+                // Clean up if connection failed
+                if (!connected)
+                {
+                    _pipeClient?.Dispose();
+                    _pipeClient = null;
+                }
+                
+                throw;
             }
         }
 
@@ -222,13 +407,24 @@ namespace VoiceAssistant.Core.Services
         {
             try
             {
-                while ((_isServer && _pipeServer.IsConnected) || 
-                       (!_isServer && _pipeClient.IsConnected))
+                _logger.LogInformation("Starting message receiving loop");
+                
+                while ((_isServer && _pipeServer?.IsConnected == true) || 
+                       (!_isServer && _pipeClient?.IsConnected == true))
                 {
+                    if (_reader == null)
+                    {
+                        _logger.LogWarning("Reader is null, breaking message loop");
+                        break;
+                    }
+                    
                     string messageJson = await _reader.ReadLineAsync();
                     
                     if (string.IsNullOrEmpty(messageJson))
                     {
+                        // A null/empty line might indicate the pipe is broken
+                        _logger.LogWarning("Received empty message, pipe may be broken");
+                        await Task.Delay(100); // Small delay to avoid tight loop
                         continue;
                     }
                     
@@ -241,6 +437,10 @@ namespace VoiceAssistant.Core.Services
                             _logger.LogDebug("Received IPC message of type {MessageType}", message.Type);
                             MessageReceived?.Invoke(this, message);
                         }
+                        else
+                        {
+                            _logger.LogWarning("Deserialized message was null");
+                        }
                     }
                     catch (JsonException ex)
                     {
@@ -251,6 +451,10 @@ namespace VoiceAssistant.Core.Services
             catch (IOException ex)
             {
                 _logger.LogWarning(ex, "Pipe connection was closed");
+            }
+            catch (ObjectDisposedException ex)
+            {
+                _logger.LogWarning(ex, "Pipe was disposed while reading");
             }
             catch (Exception ex)
             {
@@ -281,14 +485,18 @@ namespace VoiceAssistant.Core.Services
 
             if (disposing)
             {
+                _logger.LogInformation("Disposing NamedPipeIpcService");
+                
+                _disposed = true; // Mark as disposed first to stop reconnection attempts
+                _reconnecting = false;
+                
+                // Cancel any ongoing operations
                 _cts?.Cancel();
                 _cts?.Dispose();
+                _cts = null;
                 
-                _writer?.Dispose();
-                _reader?.Dispose();
-                
-                _pipeServer?.Dispose();
-                _pipeClient?.Dispose();
+                // Clean up resources
+                CleanupConnection();
             }
 
             _disposed = true;
