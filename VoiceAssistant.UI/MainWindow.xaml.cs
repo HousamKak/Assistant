@@ -34,6 +34,7 @@ namespace VoiceAssistant.UI
         private readonly TimeSpan _connectionRetryInterval = TimeSpan.FromSeconds(10);
         private readonly Storyboard _wakeWordDetectedStoryboard;
         private readonly Storyboard _enhancedPulseStoryboard;
+        private readonly MediaPlayer _wakeWordSound = new MediaPlayer();
 
         public MainWindow(
             ILogger<MainWindow> logger,
@@ -50,6 +51,18 @@ namespace VoiceAssistant.UI
             
             Console.WriteLine("MainWindow initializing");
             _logger.LogInformation("MainWindow initializing");
+            
+            // Preload the wake word sound
+            try
+            {
+                _wakeWordSound.Open(new Uri("pack://application:,,,/Resources/omnitrix.mp3"));
+                _wakeWordSound.Volume = 1.0;
+                _logger.LogInformation("Omnitrex wake sound loaded successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not load omnitrex wake sound");
+            }
             
             // Position the window in the bottom right corner of the screen
             PositionWindowBottomRight();
@@ -525,23 +538,33 @@ namespace VoiceAssistant.UI
             _enhancedPulseStoryboard.Stop();
             _enhancedPulseStoryboard.Begin();
             
-            // Try to play a notification sound
+            // Play omnitrex voice sound
             try
             {
-                SystemSounds.Asterisk.Play();
+                // Reset the player and play the sound
+                _wakeWordSound.Stop();
+                _wakeWordSound.Open(new Uri("pack://application:,,,/Resources/omnitrix.mp3"));
+                _wakeWordSound.Play();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"WARNING: Could not play notification sound: {ex.Message}");
-                _logger.LogWarning(ex, "Could not play notification sound");
+                Console.WriteLine($"WARNING: Could not play omnitrex sound: {ex.Message}");
+                _logger.LogWarning(ex, "Could not play omnitrex sound, falling back to system sound");
+                
+                // Fall back to system sound if custom sound fails
+                try
+                {
+                    SystemSounds.Asterisk.Play();
+                }
+                catch (Exception soundEx)
+                {
+                    _logger.LogWarning(soundEx, "Could not play fallback system sound");
+                }
             }
         }
 
         private void ForceShowWakeWordDetection()
         {
-            // This is a fallback method to ensure wake word detection is visible
-            // It will be called directly when the IPC connection is restored
-            
             Dispatcher.Invoke(() =>
             {
                 Console.WriteLine("Forcing wake word detection display");
@@ -591,15 +614,28 @@ namespace VoiceAssistant.UI
                 
                 timer.Start();
                 
-                // Try to play a notification sound
+                // Play omnitrex voice sound
                 try
                 {
-                    SystemSounds.Asterisk.Play();
+                    // Reset the player and play the sound
+                    _wakeWordSound.Stop();
+                    _wakeWordSound.Open(new Uri("pack://application:,,,/Resources/omnitrix.mp3"));
+                    _wakeWordSound.Play();
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"WARNING: Could not play notification sound: {ex.Message}");
-                    _logger.LogWarning(ex, "Could not play notification sound");
+                    Console.WriteLine($"WARNING: Could not play omnitrex sound: {ex.Message}");
+                    _logger.LogWarning(ex, "Could not play omnitrex sound, falling back to system sound");
+                    
+                    // Fall back to system sound if custom sound fails
+                    try
+                    {
+                        SystemSounds.Asterisk.Play();
+                    }
+                    catch (Exception soundEx)
+                    {
+                        _logger.LogWarning(soundEx, "Could not play fallback system sound");
+                    }
                 }
             });
         }
@@ -868,6 +904,17 @@ namespace VoiceAssistant.UI
                 {
                     _ipcService.MessageReceived -= OnIpcMessageReceived;
                     Task.Run(async () => await _ipcService.StopAsync()).Wait();
+                }
+                
+                // Clean up media player resources
+                try
+                {
+                    _wakeWordSound.Stop();
+                    _wakeWordSound.Close();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error cleaning up media player");
                 }
 
                 base.OnClosing(e);

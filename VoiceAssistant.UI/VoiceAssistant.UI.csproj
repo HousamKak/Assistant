@@ -11,6 +11,9 @@
   <ItemGroup>
     <ProjectReference Include="..\VoiceAssistant.Core\VoiceAssistant.Core.csproj" />
     <Resource Include="resources\microphone.ico" />
+     <Content Include="Resources\omnitrix.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
