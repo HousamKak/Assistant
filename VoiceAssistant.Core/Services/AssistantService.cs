@@ -160,8 +160,15 @@ namespace VoiceAssistant.Core.Services
 
             _logger.LogInformation("Wake word detected: {Keyword}", keyword);
             
-            // Start capturing the command
-            Task.Run(async () => await BeginListeningForCommandAsync());
+            // Explicitly update to WakeWordDetected state first
+            UpdateState(ListeningState.WakeWordDetected);
+            
+            // Add a short delay to ensure UI can display the wake word detection state
+            Task.Delay(1000).ContinueWith(async _ => 
+            {
+                // Start capturing the command after delay
+                await BeginListeningForCommandAsync();
+            });
         }
 
         private void OnPcmDataCaptured(object sender, short[] pcmData)
@@ -199,13 +206,22 @@ namespace VoiceAssistant.Core.Services
         {
             try
             {
-                UpdateState(ListeningState.Listening);
-                
-                // Create a new buffer for the command audio
-                _commandBuffer?.Dispose();
-                _commandBuffer = new MemoryStream();
-                
-                _logger.LogInformation("Listening for command");
+                // Only transition to Listening if we're in WakeWordDetected state
+                // This ensures we don't accidentally skip the visual feedback
+                if (CurrentState.State == ListeningState.WakeWordDetected)
+                {
+                    UpdateState(ListeningState.Listening);
+                    
+                    // Create a new buffer for the command audio
+                    _commandBuffer?.Dispose();
+                    _commandBuffer = new MemoryStream();
+                    
+                    _logger.LogInformation("Listening for command");
+                }
+                else
+                {
+                    _logger.LogWarning("Attempted to begin listening from invalid state: {State}", CurrentState.State);
+                }
             }
             catch (Exception ex)
             {

@@ -270,6 +270,13 @@ namespace VoiceAssistant.Service.Services
                 try
                 {
                     _logger.LogDebug("Assistant state changed to {State}. Notifying UI", state.State);
+                    
+                    // When wake word is detected, log more information
+                    if (state.State == ListeningState.WakeWordDetected)
+                    {
+                        _logger.LogInformation("Wake word detected! Transitioning to listening state.");
+                    }
+                    
                     var message = new IpcMessage
                     {
                         Type = MessageType.StateChange,
@@ -282,6 +289,10 @@ namespace VoiceAssistant.Service.Services
                 {
                     _logger.LogError(ex, "Error sending state change notification");
                 }
+            }
+            else
+            {
+                _logger.LogWarning("Cannot notify UI of state change to {State}: IPC service is not connected", state.State);
             }
         }
 
