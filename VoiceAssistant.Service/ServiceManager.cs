@@ -1,10 +1,7 @@
-// VoiceAssistant.Service/Services/ServiceManager.cs
-
+// VoiceAssistant.Service/ServiceManager.cs - CUDA Version
 
 using System.Reflection;
 using System.Text.Json;
-
-
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -12,10 +9,6 @@ using Serilog;
 using VoiceAssistant.Core.Interfaces;
 using VoiceAssistant.Core.Models;
 using VoiceAssistant.Core.Services;
-
-// Whisper imports
-using Whisper.net;
-using Whisper.net.Ggml;
 
 namespace VoiceAssistant.Service.Services
 {
@@ -526,6 +519,14 @@ namespace VoiceAssistant.Service.Services
                     Directory.CreateDirectory(keywordsPath);
                 }
                 
+                // Create whisper directory
+                string whisperPath = Path.Combine(basePath, "whisper");
+                if (!Directory.Exists(whisperPath))
+                {
+                    _logger.LogInformation("Creating whisper directory at {WhisperPath}", whisperPath);
+                    Directory.CreateDirectory(whisperPath);
+                }
+                
                 // Create logs directory
                 string logsPath = Path.Combine(basePath, "logs");
                 if (!Directory.Exists(logsPath))
@@ -560,6 +561,44 @@ namespace VoiceAssistant.Service.Services
                     ? wakeWordModelRelPath
                     : Path.Combine(basePath, wakeWordModelRelPath);
                 
+                // Check whisper.cpp executable
+                string executablePath = Path.Combine(basePath, "whisper", "main.exe");
+                if (!File.Exists(executablePath))
+                {
+                    _logger.LogWarning("Whisper executable not found at {ExecutablePath}. Please run the installer.", executablePath);
+                    return false;
+                }
+                else
+                {
+                    _logger.LogInformation("Whisper executable found at {ExecutablePath}", executablePath);
+                    
+                    // Check for CUDA support
+                    bool cudaEnabled = _configuration.GetValue<bool>("VoiceAssistant:SpeechRecognition:CudaEnabled", true);
+                    if (cudaEnabled)
+                    {
+                        string cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
+                        if (string.IsNullOrEmpty(cudaPath))
+                        {
+                            _logger.LogWarning("CUDA_PATH environment variable not found. CUDA may not be properly configured.");
+                        }
+                        else
+                        {
+                            _logger.LogInformation("CUDA installation found at: {CudaPath}", cudaPath);
+                        }
+                        
+                        // Check for CUDA support in the binary
+                        bool hasCudaSupport = await CheckCudaSupportAsync(executablePath, cancellationToken);
+                        if (hasCudaSupport)
+                        {
+                            _logger.LogInformation("CUDA support detected in the whisper.cpp executable. GPU acceleration will be used.");
+                        }
+                        else
+                        {
+                            _logger.LogWarning("CUDA support NOT detected in the whisper.cpp executable. Performance may be limited to CPU processing.");
+                        }
+                    }
+                }
+                
                 // Check Whisper model
                 if (File.Exists(modelPath))
                 {
@@ -567,7 +606,7 @@ namespace VoiceAssistant.Service.Services
                 }
                 else
                 {
-                    _logger.LogWarning("Whisper model not found at {ModelPath}", modelPath);
+                    _logger.LogWarning("Whisper model not found at {ModelPath}. Please run the installer.", modelPath);
                     return false;
                 }
                 
@@ -587,6 +626,55 @@ namespace VoiceAssistant.Service.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error verifying models");
+                return false;
+            }
+        }
+
+        private async Task<bool> CheckCudaSupportAsync(string executablePath, CancellationToken cancellationToken)
+        {
+            try
+            {
+                using var process = new System.Diagnostics.Process();
+                process.StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = executablePath,
+                    Arguments = "--help",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                
+                process.Start();
+                
+                using var outputCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                outputCts.CancelAfter(5000); // 5 second timeout
+                
+                var outputTask = process.StandardOutput.ReadToEndAsync();
+                var errorTask = process.StandardError.ReadToEndAsync();
+                
+                await Task.WhenAny(Task.WhenAll(outputTask, errorTask), Task.Delay(5000, cancellationToken));
+                
+                string output = "";
+                string error = "";
+                
+                if (outputTask.IsCompleted)
+                    output = outputTask.Result;
+                
+                if (errorTask.IsCompleted)
+                    error = errorTask.Result;
+                
+                if (!process.HasExited)
+                    process.Kill();
+                
+                // Check if CUDA is mentioned in the output
+                return (output + error).Contains("CUDA") || 
+                       (output + error).Contains("cuBLAS") || 
+                       (output + error).Contains("GPU");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking CUDA support");
                 return false;
             }
         }
@@ -659,7 +747,8 @@ namespace VoiceAssistant.Service.Services
                 // Get other configuration values
                 string picovoiceApiKey = configuration.GetValue<string>("VoiceAssistant:WakeWord:AccessKey") ?? "";
                 float wakeWordSensitivity = configuration.GetValue<float>("VoiceAssistant:WakeWord:Sensitivity", 0.7f);
-                string whisperModelType = configuration.GetValue<string>("VoiceAssistant:SpeechRecognition:ModelType", "Base");
+                bool cudaEnabled = configuration.GetValue<bool>("VoiceAssistant:SpeechRecognition:CudaEnabled", true);
+                string whisperModelType = configuration.GetValue<string>("VoiceAssistant:SpeechRecognition:ModelType", "large-v3");
                 string ipcPipeName = configuration.GetValue<string>("VoiceAssistant:IPC:PipeName", "VoiceAssistantPipe");
                 int sampleRate = configuration.GetValue<int>("VoiceAssistant:AudioCapture:SampleRate", 16000);
                 int channels = configuration.GetValue<int>("VoiceAssistant:AudioCapture:Channels", 1);
@@ -689,26 +778,19 @@ namespace VoiceAssistant.Service.Services
                 // Speech recognition service with configuration
                 services.AddSingleton<ISpeechRecognitionService>(sp => 
                 {
-                    var logger = sp.GetRequiredService<ILogger<WhisperSpeechRecognitionService>>();
+                    var logger = sp.GetRequiredService<ILogger<WhisperCppSpeechRecognitionService>>();
                     
-                    // Convert string model type to enum
-                    GgmlType ggmlType = whisperModelType.ToLowerInvariant() switch
-                    {
-                        "tiny" => GgmlType.Tiny,
-                        "base" => GgmlType.Base,
-                        "small" => GgmlType.Small,
-                        "medium" => GgmlType.Medium,
-                        // Removed the "large" case as it is not valid for this version
-                        _ => GgmlType.Base
-                    };
+                    string whisperPath = Path.Combine(basePath, "whisper", "main.exe");
                     
-                    logger.LogInformation("WhisperSpeechRecognitionService created with model type {ModelType} at path {ModelPath}", 
-                        ggmlType, modelPath);
-                        
-                    return new WhisperSpeechRecognitionService(
+                    logger.LogInformation("WhisperCppSpeechRecognitionService created with model type {ModelType} at path {ModelPath}. CUDA enabled: {CudaEnabled}", 
+                        whisperModelType, modelPath, cudaEnabled);
+                    
+                    return new WhisperCppSpeechRecognitionService(
                         logger,
                         modelPath,
-                        ggmlType);
+                        cudaEnabled,
+                        whisperModelType,
+                        whisperPath);
                 });
 
                 // Command processor service
@@ -741,8 +823,8 @@ namespace VoiceAssistant.Service.Services
                     baseSettings.WakeWord.ResponsePhrase = configuration.GetValue<string>("VoiceAssistant:WakeWord:ResponsePhrase", "Yes, I'm listening");
                     
                     // Set speech recognition settings
-                    baseSettings.SpeechRecognition.ModelPath = configuration.GetValue<string>("VoiceAssistant:SpeechRecognition:ModelPath", "Models/ggml-base.bin");
-                    baseSettings.SpeechRecognition.ModelType = configuration.GetValue<string>("VoiceAssistant:SpeechRecognition:ModelType", "Base");
+                    baseSettings.SpeechRecognition.ModelPath = configuration.GetValue<string>("VoiceAssistant:SpeechRecognition:ModelPath", "Models/ggml-large-v3.bin");
+                    baseSettings.SpeechRecognition.ModelType = configuration.GetValue<string>("VoiceAssistant:SpeechRecognition:ModelType", "large-v3");
                     
                     // Set audio capture settings
                     baseSettings.AudioCapture.SampleRate = configuration.GetValue<int>("VoiceAssistant:AudioCapture:SampleRate", 16000);
