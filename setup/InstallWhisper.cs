@@ -139,9 +139,18 @@ namespace VoiceAssistant.Setup
                     return;
                 }
 
-                // Deploy to service folder
+                // Locate the folder where your build put the files:
+                string builtDir = Path.GetDirectoryName(builtExe)!;
+
+                // Copy every .dll (and any other auxiliary files) from the build output
+                foreach (var dllPath in Directory.GetFiles(builtDir, "*.dll"))
+                {
+                    string targetPath = Path.Combine(whisperDir, Path.GetFileName(dllPath));
+                    File.Copy(dllPath, targetPath, overwrite: true);
+                }
+
+                // Then copy the main.exe itself
                 string destExe = Path.Combine(whisperDir, "main.exe");
-                Console.WriteLine($"Deploying executable to {destExe}...");
                 File.Copy(builtExe, destExe, overwrite: true);
 
                 // Verify CUDA support in binary
