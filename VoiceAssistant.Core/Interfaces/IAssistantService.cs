@@ -1,7 +1,4 @@
 // VoiceAssistant.Core/Interfaces/IAssistantService.cs
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using VoiceAssistant.Core.Models;
 
 namespace VoiceAssistant.Core.Interfaces

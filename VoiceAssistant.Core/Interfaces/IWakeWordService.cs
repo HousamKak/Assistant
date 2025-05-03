@@ -1,8 +1,6 @@
 
 // VoiceAssistant.Core/Interfaces/IWakeWordService.cs
-using System;
-using System.Threading;
-using System.Threading.Tasks;
+
 
 namespace VoiceAssistant.Core.Interfaces
 {
