@@ -1,0 +1,15 @@
+
+  {
+      "WhisperSetup": {
+        "Version": "1.5.4",
+        "WhisperCppUrl": "https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v1.5.4.zip",
+        "CudaEnabled": true,
+        "ModelsBaseUrl": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main",
+        "Models": {
+          "large-v3": "ggml-large-v3.bin"
+        },
+        "InstallPath": "whisper",
+        "ModelPath": "Models"
+      }
+  }
+  
