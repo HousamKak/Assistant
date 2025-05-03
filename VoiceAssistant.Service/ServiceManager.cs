@@ -507,37 +507,35 @@ namespace VoiceAssistant.Service.Services
                 string modelsPath = Path.Combine(basePath, "Models");
                 if (!Directory.Exists(modelsPath))
                 {
-                    _logger.LogInformation("Creating Models directory at {ModelsPath}", modelsPath);
+                    Log.Information("Creating Models directory at {ModelsPath}", modelsPath);
                     Directory.CreateDirectory(modelsPath);
                 }
                 
-                // Create Keywords directory
+                // Similarly for other directories
                 string keywordsPath = Path.Combine(basePath, "Keywords");
                 if (!Directory.Exists(keywordsPath))
                 {
-                    _logger.LogInformation("Creating Keywords directory at {KeywordsPath}", keywordsPath);
+                    Log.Information("Creating Keywords directory at {KeywordsPath}", keywordsPath);
                     Directory.CreateDirectory(keywordsPath);
                 }
                 
-                // Create whisper directory
                 string whisperPath = Path.Combine(basePath, "whisper");
                 if (!Directory.Exists(whisperPath))
                 {
-                    _logger.LogInformation("Creating whisper directory at {WhisperPath}", whisperPath);
+                    Log.Information("Creating whisper directory at {WhisperPath}", whisperPath);
                     Directory.CreateDirectory(whisperPath);
                 }
                 
-                // Create logs directory
                 string logsPath = Path.Combine(basePath, "logs");
                 if (!Directory.Exists(logsPath))
                 {
-                    _logger.LogInformation("Creating logs directory at {LogsPath}", logsPath);
+                    Log.Information("Creating logs directory at {LogsPath}", logsPath);
                     Directory.CreateDirectory(logsPath);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error ensuring directories exist");
+                Log.Error(ex, "Error ensuring directories exist");
                 throw;
             }
         }

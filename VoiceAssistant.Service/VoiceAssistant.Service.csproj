@@ -27,7 +27,13 @@
   <None Include="Models\ggml-base.bin">
     <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
   </None>
+   <None Include="Models\ggml-large-v3.bin">
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+  </None>
    <None Update="appsettings.json">
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+  </None>
+  <None Include="whisper\**\*">
     <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
   </None>
 </ItemGroup>
